@@ -1,5 +1,29 @@
-epubQTools [![Release](https://img.shields.io/github/release/quiris11/epubqtools.svg)](https://github.com/quiris11/epubqtools/releases/latest)
-==========
+# epubTools Suite
+
+Desktopowa aplikacja Windows łącząca **epubQTools** i **konwerter EPUB** w jednym oknie GUI.
+
+## Szybki start
+
+```bash
+# Wymagania: Python 3.7+, tkinter, pandoc lub Calibre (do konwersji)
+python gui_main.py
+```
+
+## Build — skompilowany .exe
+
+```bash
+pip install pyinstaller
+python -m PyInstaller epubtools_suite.spec --clean
+# → dist/epubTools_Suite.exe
+```
+
+Lub uruchom `build.bat` na Windows.  
+Push do `master` → GitHub Actions buduje `.exe` jako artefakt (30 dni).  
+Utwórz Release (`git tag v1.0.0 && git push origin v1.0.0`) → `.exe` dołączony do Release.
+
+---
+
+# epubQTools [![Release](https://img.shields.io/github/release/quiris11/epubqtools.svg)](https://github.com/quiris11/epubqtools/releases/latest)
 
 Tools for checking, correcting and hyphenating EPUB files.
 
