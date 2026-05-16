@@ -123,6 +123,34 @@ def _find_viewer() -> str:
     return ""
 
 
+def _find_sigil() -> str:
+    """Szuka edytora Sigil."""
+    s = shutil.which("sigil") or shutil.which("Sigil")
+    if s:
+        return s
+    for p in [
+        r"C:\Program Files\Sigil\Sigil.exe",
+        r"C:\Program Files (x86)\Sigil\Sigil.exe",
+    ]:
+        if os.path.isfile(p):
+            return p
+    return ""
+
+
+def _find_ebook_editor() -> str:
+    """Szuka Calibre e-book editor (ebook-edit)."""
+    e = shutil.which("ebook-edit")
+    if e:
+        return e
+    for p in [
+        r"C:\Program Files\Calibre2\ebook-edit.exe",
+        r"C:\Program Files (x86)\Calibre2\ebook-edit.exe",
+    ]:
+        if os.path.isfile(p):
+            return p
+    return ""
+
+
 def _config_path() -> Path:
     if getattr(sys, "frozen", False):
         base = Path(sys.executable).parent
@@ -324,6 +352,8 @@ class App(_AppBase):
         self._eq_path = _find_epubqtools_main()
         self._conv_engine, self._conv_path = _find_converter()
         self._viewer_path = _find_viewer()
+        self._sigil_path = _find_sigil()
+        self._ebook_editor_path = _find_ebook_editor()
         self._last_converted: str = ""
 
         self._build_toolbar()
@@ -526,11 +556,56 @@ class App(_AppBase):
         self._eq_title = ttk.Entry(single_sec)
         self._eq_title.pack(fill="x")
 
-        # ── Prawa: log ────────────────────────────────────────────────────────
+        # ── Prawa: lista plików + log ─────────────────────────────────────────
         right = tk.Frame(paned, bg=BG)
-        paned.add(right, minsize=300)
+        paned.add(right, minsize=340)
+
+        # Lista wykrytych plików EPUB
+        epub_list_sec = Section(right, "Pliki EPUB w katalogu")
+        epub_list_sec.pack(fill="both", expand=True, padx=6, pady=(6, 2))
+
+        # Listbox z plikami
+        lb_frame = tk.Frame(epub_list_sec, bg=BORDER)
+        lb_frame.pack(fill="both", expand=True)
+        lb_sb = ttk.Scrollbar(lb_frame, orient="vertical")
+        self._epub_lb = tk.Listbox(
+            lb_frame, bg=ENTRY_BG, fg=FG, selectbackground=ACCENT,
+            selectforeground=FG, activestyle="none",
+            font=("Consolas", 9), yscrollcommand=lb_sb.set,
+            borderwidth=0, highlightthickness=0,
+        )
+        lb_sb.config(command=self._epub_lb.yview)
+        lb_sb.pack(side="right", fill="y")
+        self._epub_lb.pack(side="left", fill="both", expand=True)
+        self._epub_lb.bind("<Double-Button-1>", lambda e: self._open_in_default_editor())
+
+        # Przyciski edytorów
+        ed_bar = tk.Frame(epub_list_sec, bg=BG)
+        ed_bar.pack(fill="x", pady=(4, 0))
+
+        sigil_txt  = "Sigil ✓" if self._sigil_path  else "Sigil ✗"
+        caled_txt  = "Calibre editor ✓" if self._ebook_editor_path else "Calibre editor ✗"
+        sigil_st   = "TButton" if self._sigil_path  else "TButton"
+        caled_st   = "TButton" if self._ebook_editor_path else "TButton"
+
+        ttk.Button(ed_bar, text=f"✎  {sigil_txt}",
+                   command=self._open_in_sigil).pack(side="left", padx=(0, 4))
+        ttk.Button(ed_bar, text=f"✎  {caled_txt}",
+                   command=self._open_in_calibre_editor).pack(side="left", padx=(0, 4))
+        ttk.Button(ed_bar, text="↺", width=3,
+                   command=self._refresh_epub_list).pack(side="right")
+
+        self._epub_count_lbl = tk.Label(epub_list_sec, text="", bg=BG, fg=FG_DIM,
+                                         font=("Segoe UI", 8))
+        self._epub_count_lbl.pack(anchor="w", pady=(2, 0))
+        self._label_roles[self._epub_count_lbl] = "dim"
+
+        # Odśwież listę gdy zmieni się katalog
+        self._epub_dir.var.trace_add("write", lambda *_: self.after(300, self._refresh_epub_list))
+
         ttk.Button(right, text="▶  Uruchom epubQTools", style="Accent.TButton",
-                   command=self._run_epubqtools).pack(fill="x", padx=6, pady=(6, 4))
+                   command=self._run_epubqtools).pack(fill="x", padx=6, pady=4)
+
         log_sec = Section(right, "Log")
         log_sec.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         self._eq_log = self._make_log(log_sec)
@@ -770,6 +845,69 @@ class App(_AppBase):
             messagebox.showinfo("Brak pliku", "Nie skonwertowano jeszcze żadnego pliku.")
             return
         self._preview_epub(self._last_converted)
+
+    # ── Lista plików EPUB i edytory ───────────────────────────────────────────
+
+    def _refresh_epub_list(self):
+        """Skanuje katalog EPUB i aktualizuje listbox."""
+        self._epub_lb.delete(0, "end")
+        d = self._epub_dir.get()
+        if not d or not Path(d).is_dir():
+            self._epub_count_lbl.config(text="")
+            return
+        files = sorted(Path(d).glob("*.epub"), key=lambda p: p.name.lower())
+        for f in files:
+            # _moh.epub oznaczamy inaczej
+            marker = "★ " if f.name.endswith("_moh.epub") else "  "
+            self._epub_lb.insert("end", marker + f.name)
+        count = len(files)
+        moh = sum(1 for f in files if f.name.endswith("_moh.epub"))
+        lbl = f"{count} plików EPUB"
+        if moh:
+            lbl += f"  (★ {moh} _moh.epub)"
+        self._epub_count_lbl.config(text=lbl)
+
+    def _selected_epub_path(self) -> Path | None:
+        """Zwraca pełną ścieżkę zaznaczonego pliku z listboxa."""
+        sel = self._epub_lb.curselection()
+        if not sel:
+            return None
+        name = self._epub_lb.get(sel[0]).lstrip("★ ").strip()
+        d = self._epub_dir.get()
+        if not d:
+            return None
+        return Path(d) / name
+
+    def _open_in_editor(self, editor_path: str, editor_name: str):
+        path = self._selected_epub_path()
+        if not path:
+            messagebox.showinfo("Brak zaznaczenia", "Zaznacz plik EPUB na liście.")
+            return
+        if not editor_path:
+            messagebox.showerror("Brak edytora",
+                f"{editor_name} nie został znaleziony.\n"
+                "Zainstaluj go i upewnij się, że jest dostępny w PATH.")
+            return
+        if not path.is_file():
+            messagebox.showwarning("Brak pliku", f"Plik nie istnieje:\n{path}")
+            return
+        subprocess.Popen([editor_path, str(path)], creationflags=CREATE_NO_WINDOW)
+
+    def _open_in_sigil(self):
+        self._open_in_editor(self._sigil_path, "Sigil")
+
+    def _open_in_calibre_editor(self):
+        self._open_in_editor(self._ebook_editor_path, "Calibre e-book editor")
+
+    def _open_in_default_editor(self):
+        """Otwiera plik w pierwszym dostępnym edytorze (dwuklik)."""
+        if self._sigil_path:
+            self._open_in_sigil()
+        elif self._ebook_editor_path:
+            self._open_in_calibre_editor()
+        else:
+            messagebox.showinfo("Brak edytora",
+                "Nie znaleziono Sigil ani Calibre e-book editor.")
 
     # ── Logika epubQTools ─────────────────────────────────────────────────────
 
@@ -1055,6 +1193,7 @@ class App(_AppBase):
             self._apply_theme(dark)
         else:
             self._check_tools()
+        self._refresh_epub_list()
 
     def _on_close(self):
         self._save_config()
