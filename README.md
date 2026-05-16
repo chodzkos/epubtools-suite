@@ -124,6 +124,23 @@ epubtools-suite/
 
 ---
 
+## Pierwsze uruchomienie — Windows SmartScreen
+
+Po pobraniu `.exe` Windows może wyświetlić ostrzeżenie:
+**„System Windows ochronił ten komputer"** (SmartScreen).
+
+Dzieje się tak, ponieważ plik `.exe` nie jest podpisany certyfikatem kodu (code-signing certificate). Plik jest bezpieczny — możesz zweryfikować źródło w zakładce [Actions](https://github.com/chodzkos/epubtools-suite/actions) na GitHub.
+
+**Jak uruchomić mimo ostrzeżenia:**
+1. Kliknij **„Więcej informacji"** w oknie SmartScreen.
+2. Kliknij przycisk **„Uruchom mimo to"**.
+
+Ostrzeżenie pojawi się tylko przy pierwszym uruchomieniu danego pliku.
+
+> **Alternatywnie:** kliknij plik prawym przyciskiem myszy → **Właściwości** → zaznacz **„Odblokuj"** → OK.
+
+---
+
 ## Oparty na
 
 - [quiris11/epubQTools](https://github.com/quiris11/epubQTools) — narzędzie do przetwarzania EPUB (fork, gałąź master)
