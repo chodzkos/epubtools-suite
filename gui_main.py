@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -98,6 +99,20 @@ def _find_python() -> str:
                 return base
 
     return ""
+
+
+def _config_path() -> Path:
+    """Zwraca ścieżkę do config.json obok exe/skryptu (lub w home jako fallback)."""
+    if getattr(sys, "frozen", False):
+        base = Path(sys.executable).parent
+    else:
+        base = Path(__file__).parent
+    p = base / "config.json"
+    if os.access(base, os.W_OK):
+        return p
+    fallback = Path.home() / ".epubtools_suite"
+    fallback.mkdir(exist_ok=True)
+    return fallback / "config.json"
 
 
 # ─── Styl ─────────────────────────────────────────────────────────────────────
@@ -266,6 +281,8 @@ class App(tk.Tk):
 
         self._build_tab_epubqtools()
         self._build_tab_converter()
+        self._load_config()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ── Zakładka 1: epubQTools ────────────────────────────────────────────────
 
@@ -626,6 +643,118 @@ class App(tk.Tk):
             text="epubcheck: ✓" if ec_found else "epubcheck: ✗",
             fg=TAG_OK if ec_found else TAG_ERR,
         )
+
+    def _save_config(self):
+        """Zapisuje wszystkie ustawienia GUI do config.json."""
+        config = {
+            # epubQTools — ścieżki
+            "eq_main":        self._eq_entry.get(),
+            "py_interpreter": self._py_entry.get(),
+            "epub_dir":       self._epub_dir.get(),
+            "tools_path":     self._tools_path.get(),
+            "logs_path":      self._logs_path.get(),
+            "font_dir":       self._font_dir.get(),
+            # epubQTools — wartości
+            "book_margin":    self._book_margin.get(),
+            "font_family":    self._font_family.get(),
+            "single_i":       self._single_i.get(),
+            "eq_author":      self._eq_author.get(),
+            "eq_title":       self._eq_title.get(),
+            # epubQTools — checkboxy
+            "flags": {k: v.get() for k, v in self._flags.items()},
+            # Konwerter
+            "conv_outdir":  self._conv_outdir.get(),
+            "conv_title":   self._conv_title.get(),
+            "conv_author":  self._conv_author.get(),
+            "conv_lang":    self._conv_lang.get(),
+            # Pandoc (opcjonalne — tylko gdy wykryto)
+            "pandoc_toc":        getattr(self, "_pandoc_toc",        tk.BooleanVar()).get(),
+            "pandoc_standalone": getattr(self, "_pandoc_standalone",  tk.BooleanVar(value=True)).get(),
+            "pandoc_chapter":    getattr(self, "_pandoc_chapter",     tk.StringVar(value="1")).get(),
+            # Okno
+            "geometry": self.geometry(),
+        }
+        try:
+            _config_path().write_text(
+                json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+    def _load_config(self):
+        """Wczytuje ustawienia z config.json po zbudowaniu wszystkich widgetów."""
+        try:
+            p = _config_path()
+            if not p.is_file():
+                return
+            config = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return
+
+        # Geometria okna
+        if geom := config.get("geometry"):
+            try:
+                self.geometry(geom)
+            except Exception:
+                pass
+
+        # Ścieżki (PathEntry)
+        for key, attr in [
+            ("eq_main",        "_eq_entry"),
+            ("py_interpreter", "_py_entry"),
+            ("epub_dir",       "_epub_dir"),
+            ("tools_path",     "_tools_path"),
+            ("logs_path",      "_logs_path"),
+            ("font_dir",       "_font_dir"),
+            ("conv_outdir",    "_conv_outdir"),
+        ]:
+            val = config.get(key, "")
+            if val:
+                getattr(self, attr).set(val)
+
+        # StringVar
+        for key, attr in [
+            ("book_margin", "_book_margin"),
+            ("font_family", "_font_family"),
+            ("single_i",    "_single_i"),
+        ]:
+            val = config.get(key)
+            if val is not None:
+                getattr(self, attr).set(val)
+
+        # Entry (tekst)
+        for key, attr in [
+            ("eq_author",  "_eq_author"),
+            ("eq_title",   "_eq_title"),
+            ("conv_title", "_conv_title"),
+            ("conv_author","_conv_author"),
+            ("conv_lang",  "_conv_lang"),
+        ]:
+            val = config.get(key, "")
+            if val:
+                e = getattr(self, attr)
+                e.delete(0, "end")
+                e.insert(0, val)
+
+        # Checkboxy (flagi epubQTools)
+        for flag, saved in config.get("flags", {}).items():
+            if flag in self._flags:
+                self._flags[flag].set(saved)
+
+        # Pandoc
+        if hasattr(self, "_pandoc_toc") and "pandoc_toc" in config:
+            self._pandoc_toc.set(config["pandoc_toc"])
+        if hasattr(self, "_pandoc_standalone") and "pandoc_standalone" in config:
+            self._pandoc_standalone.set(config["pandoc_standalone"])
+        if hasattr(self, "_pandoc_chapter") and "pandoc_chapter" in config:
+            self._pandoc_chapter.set(config["pandoc_chapter"])
+
+        # Odśwież detekcję narzędzi po wczytaniu ścieżki
+        self._check_tools()
+
+    def _on_close(self):
+        self._save_config()
+        self.destroy()
 
     def _build_q_args(self) -> list[str]:
         args = []
