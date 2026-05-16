@@ -13,24 +13,41 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-# ─── Kolory ──────────────────────────────────────────────────────────────────
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+    HAS_DND = True
+except ImportError:
+    HAS_DND = False
 
-BG        = "#1e1e1e"
-BG2       = "#252526"
-BG3       = "#2d2d30"
-FG        = "#cccccc"
-FG_DIM    = "#858585"
-ACCENT    = "#0e639c"
-ACCENT_HV = "#1177bb"
-ENTRY_BG  = "#3c3c3c"
-BORDER    = "#3f3f3f"
-BTN_BG    = "#0e639c"
-BTN_FG    = "#ffffff"
-LOG_BG    = "#1e1e1e"
-LOG_FG    = "#d4d4d4"
-TAG_OK    = "#4ec9b0"
-TAG_ERR   = "#f44747"
-TAG_WARN  = "#dcdcaa"
+# ─── Motywy ───────────────────────────────────────────────────────────────────
+
+DARK = dict(
+    BG="#1e1e1e", BG2="#252526", BG3="#2d2d30",
+    FG="#cccccc", FG_DIM="#858585",
+    ACCENT="#0e639c", ACCENT_HV="#1177bb",
+    ENTRY_BG="#3c3c3c", BORDER="#3f3f3f",
+    BTN_BG="#0e639c", BTN_FG="#ffffff",
+    LOG_BG="#1e1e1e", LOG_FG="#d4d4d4",
+    TAG_OK="#4ec9b0", TAG_ERR="#f44747", TAG_WARN="#dcdcaa",
+)
+LIGHT = dict(
+    BG="#f5f5f5", BG2="#ebebeb", BG3="#e0e0e0",
+    FG="#1e1e1e", FG_DIM="#6e6e6e",
+    ACCENT="#0e639c", ACCENT_HV="#1177bb",
+    ENTRY_BG="#ffffff", BORDER="#c8c8c8",
+    BTN_BG="#0e639c", BTN_FG="#ffffff",
+    LOG_BG="#ffffff", LOG_FG="#1e1e1e",
+    TAG_OK="#107c10", TAG_ERR="#c42b1c", TAG_WARN="#9e6a03",
+)
+
+# Bieżące kolory (zmieniane przy przełączeniu motywu)
+BG = DARK["BG"]; BG2 = DARK["BG2"]; BG3 = DARK["BG3"]
+FG = DARK["FG"]; FG_DIM = DARK["FG_DIM"]
+ACCENT = DARK["ACCENT"]; ACCENT_HV = DARK["ACCENT_HV"]
+ENTRY_BG = DARK["ENTRY_BG"]; BORDER = DARK["BORDER"]
+BTN_BG = DARK["BTN_BG"]; BTN_FG = DARK["BTN_FG"]
+LOG_BG = DARK["LOG_BG"]; LOG_FG = DARK["LOG_FG"]
+TAG_OK = DARK["TAG_OK"]; TAG_ERR = DARK["TAG_ERR"]; TAG_WARN = DARK["TAG_WARN"]
 
 CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
@@ -38,16 +55,13 @@ CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 def _find_epubqtools_main() -> Path | None:
     here = Path(sys.executable if getattr(sys, "frozen", False) else __file__).parent
-
     candidates = [
-        here / "__main__.py",                   # fork – pliki w tym samym katalogu
-        here / "epubQTools" / "__main__.py",     # podfolder
+        here / "__main__.py",
+        here / "epubQTools" / "__main__.py",
     ]
-
     if getattr(sys, "_MEIPASS", None):
         mei = Path(sys._MEIPASS)
         candidates += [mei / "__main__.py", mei / "epubQTools" / "__main__.py"]
-
     try:
         import importlib.util
         spec = importlib.util.find_spec("epubQTools")
@@ -55,11 +69,9 @@ def _find_epubqtools_main() -> Path | None:
             candidates.append(Path(spec.origin).parent / "__main__.py")
     except Exception:
         pass
-
     eq = shutil.which("epubQTools")
     if eq:
         candidates.append(Path(eq).parent / "__main__.py")
-
     for c in candidates:
         if c.is_file():
             return c
@@ -79,15 +91,11 @@ def _find_converter() -> tuple[str, str]:
 def _find_python() -> str:
     """Szuka systemowego python.exe — niezbędne gdy GUI działa jako skompilowany .exe."""
     if not getattr(sys, "frozen", False):
-        return sys.executable  # uruchomiono bezpośrednio przez python.exe
-
-    # W bundlu PyInstaller sys.executable wskazuje na .exe GUI, nie na python.exe
+        return sys.executable
     for name in ("python", "python3"):
         found = shutil.which(name)
         if found:
             return found
-
-    # Typowe lokalizacje na Windows
     username = os.environ.get("USERNAME", "")
     for ver in ("312", "311", "310", "39", "38"):
         for base in (
@@ -97,12 +105,25 @@ def _find_python() -> str:
         ):
             if os.path.isfile(base):
                 return base
+    return ""
 
+
+def _find_viewer() -> str:
+    """Szuka Calibre viewer (ebook-viewer)."""
+    v = shutil.which("ebook-viewer")
+    if v:
+        return v
+    # Typowe lokalizacje na Windows
+    for p in [
+        r"C:\Program Files\Calibre2\ebook-viewer.exe",
+        r"C:\Program Files (x86)\Calibre2\ebook-viewer.exe",
+    ]:
+        if os.path.isfile(p):
+            return p
     return ""
 
 
 def _config_path() -> Path:
-    """Zwraca ścieżkę do config.json obok exe/skryptu (lub w home jako fallback)."""
     if getattr(sys, "frozen", False):
         base = Path(sys.executable).parent
     else:
@@ -167,11 +188,9 @@ class PathEntry(tk.Frame):
         super().__init__(parent, bg=BG, **kw)
         self._mode = mode
         self._filetypes = filetypes or [("Wszystkie pliki", "*.*")]
-
         if label:
             tk.Label(self, text=label, bg=BG, fg=FG,
                      font=("Segoe UI", 9)).pack(side="left", padx=(0, 4))
-
         self.var = tk.StringVar()
         self._entry = ttk.Entry(self, textvariable=self.var)
         self._entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
@@ -193,7 +212,7 @@ class PathEntry(tk.Frame):
 
 
 class FileList(tk.Frame):
-    """Lista plików z paskiem narzędzi (dodaj, usuń, wyczyść, góra/dół)."""
+    """Lista plików z paskiem narzędzi i opcjonalnym drag & drop."""
 
     def __init__(self, parent, filetypes=None, **kw):
         super().__init__(parent, bg=BG, **kw)
@@ -207,6 +226,10 @@ class FileList(tk.Frame):
         ttk.Button(bar, text="↑", width=2, command=self._up).pack(side="left", padx=2, pady=2)
         ttk.Button(bar, text="↓", width=2, command=self._down).pack(side="left", padx=2, pady=2)
 
+        if HAS_DND:
+            tk.Label(bar, text="  ⟵ przeciągnij pliki", bg=BG2, fg=FG_DIM,
+                     font=("Segoe UI", 8)).pack(side="left", padx=6)
+
         frame = tk.Frame(self, bg=BORDER)
         frame.pack(fill="both", expand=True, pady=(2, 0))
         sb = ttk.Scrollbar(frame, orient="vertical")
@@ -217,6 +240,23 @@ class FileList(tk.Frame):
         sb.config(command=self._lb.yview)
         sb.pack(side="right", fill="y")
         self._lb.pack(side="left", fill="both", expand=True)
+
+        if HAS_DND:
+            self._lb.drop_target_register(DND_FILES)
+            self._lb.dnd_bind("<<Drop>>", self._on_drop)
+
+    def _on_drop(self, event):
+        existing = set(self._lb.get(0, "end"))
+        # tkinterdnd2 zwraca ścieżki w formacie {ścieżka ze spacjami} lub ścieżka
+        try:
+            paths = self._lb.tk.splitlist(event.data)
+        except Exception:
+            paths = [event.data]
+        for p in paths:
+            p = p.strip("{}")
+            if p and p not in existing:
+                self._lb.insert("end", p)
+                existing.add(p)
 
     def _add(self):
         paths = filedialog.askopenfilenames(filetypes=self._filetypes)
@@ -255,10 +295,19 @@ class FileList(tk.Frame):
     def get_all(self) -> list[str]:
         return list(self._lb.get(0, "end"))
 
+    def get_selected(self) -> str | None:
+        sel = self._lb.curselection()
+        return self._lb.get(sel[0]) if sel else None
+
+
+# ─── Baza App (TkinterDnD jeśli dostępne) ────────────────────────────────────
+
+_AppBase: type = TkinterDnD.Tk if HAS_DND else tk.Tk
+
 
 # ─── Główna aplikacja ─────────────────────────────────────────────────────────
 
-class App(tk.Tk):
+class App(_AppBase):
     def __init__(self):
         super().__init__()
         self.title("epubTools Suite")
@@ -266,13 +315,21 @@ class App(tk.Tk):
         self.minsize(720, 500)
         self.configure(bg=BG)
 
+        self._dark_theme = True
+        # Etykiety ze specjalnymi kolorami — odświeżane przy zmianie motywu
+        self._label_roles: dict[tk.Label, str] = {}
+
         _setup_style(self)
 
         self._eq_path = _find_epubqtools_main()
         self._conv_engine, self._conv_path = _find_converter()
+        self._viewer_path = _find_viewer()
+        self._last_converted: str = ""
+
+        self._build_toolbar()
 
         nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True, padx=8, pady=8)
+        nb.pack(fill="both", expand=True, padx=8, pady=(0, 8))
 
         self._tab_eq   = ttk.Frame(nb)
         self._tab_conv = ttk.Frame(nb)
@@ -284,11 +341,21 @@ class App(tk.Tk):
         self._load_config()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+    # ── Pasek narzędzi (górny) ────────────────────────────────────────────────
+
+    def _build_toolbar(self):
+        bar = tk.Frame(self, bg=BG2, height=32)
+        bar.pack(fill="x", padx=0, pady=0)
+        bar.pack_propagate(False)
+
+        self._theme_btn = ttk.Button(bar, text="☀ Jasny motyw",
+                                     command=self._toggle_theme)
+        self._theme_btn.pack(side="right", padx=8, pady=4)
+
     # ── Zakładka 1: epubQTools ────────────────────────────────────────────────
 
     def _build_tab_epubqtools(self):
         tab = self._tab_eq
-
         paned = tk.PanedWindow(tab, orient="horizontal", bg=BORDER,
                                sashwidth=4, sashrelief="flat",
                                handlepad=0, handlesize=0)
@@ -307,14 +374,8 @@ class App(tk.Tk):
         left = tk.Frame(canvas, bg=BG)
         win_id = canvas.create_window((0, 0), window=left, anchor="nw")
 
-        def _on_inner_resize(e):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-
-        def _on_canvas_resize(e):
-            canvas.itemconfig(win_id, width=e.width)
-
-        left.bind("<Configure>", _on_inner_resize)
-        canvas.bind("<Configure>", _on_canvas_resize)
+        left.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(win_id, width=e.width))
         canvas.bind_all("<MouseWheel>",
                         lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
 
@@ -323,45 +384,39 @@ class App(tk.Tk):
         # Ścieżka epubQTools
         eq_sec = Section(left, "Ścieżka epubQTools (__main__.py)")
         eq_sec.pack(fill="x", padx=6, pady=4)
-
         self._eq_entry = PathEntry(eq_sec, mode="file",
-                                   filetypes=[("Python", "__main__.py"),
-                                              ("Wszystkie", "*.*")])
+                                   filetypes=[("Python", "__main__.py"), ("Wszystkie", "*.*")])
         self._eq_entry.pack(fill="x")
         if self._eq_path:
             self._eq_entry.set(str(self._eq_path))
-
-        txt = f"✓ Wykryto: {self._eq_path}" if self._eq_path else "✗ Nie znaleziono — wskaż ręcznie"
-        clr = TAG_OK if self._eq_path else TAG_ERR
-        tk.Label(eq_sec, text=txt, bg=BG, fg=clr, font=("Segoe UI", 8)).pack(anchor="w", pady=(2, 0))
+        eq_lbl = self._status_label(eq_sec,
+            f"✓ Wykryto: {self._eq_path}" if self._eq_path else "✗ Nie znaleziono — wskaż ręcznie",
+            "ok" if self._eq_path else "err")
+        eq_lbl.pack(anchor="w", pady=(2, 0))
 
         # Interpreter Python
         py_sec = Section(left, "Interpreter Python (python.exe)")
         py_sec.pack(fill="x", padx=6, pady=4)
-
         py_detected = _find_python()
         self._py_entry = PathEntry(py_sec, mode="file",
                                    filetypes=[("Python", "*.exe"), ("Wszystkie", "*.*")])
         self._py_entry.pack(fill="x")
         if py_detected:
             self._py_entry.set(py_detected)
-
-        py_txt = f"✓ Wykryto: {py_detected}" if py_detected else "✗ Nie znaleziono — wskaż python.exe ręcznie"
-        py_clr = TAG_OK if py_detected else TAG_ERR
-        tk.Label(py_sec, text=py_txt, bg=BG, fg=py_clr,
-                 font=("Segoe UI", 8)).pack(anchor="w", pady=(2, 0))
+        py_lbl = self._status_label(py_sec,
+            f"✓ Wykryto: {py_detected}" if py_detected else "✗ Nie znaleziono — wskaż python.exe ręcznie",
+            "ok" if py_detected else "err")
+        py_lbl.pack(anchor="w", pady=(2, 0))
 
         # Katalog z plikami EPUB
         dir_sec = Section(left, "Katalog z plikami EPUB (wymagany)")
         dir_sec.pack(fill="x", padx=6, pady=4)
-
         self._epub_dir = PathEntry(dir_sec, mode="dir")
         self._epub_dir.pack(fill="x")
 
         # Akcje
         act_sec = Section(left, "Akcje (przynajmniej jedna wymagana)")
         act_sec.pack(fill="x", padx=6, pady=4)
-
         for flag, desc in [
             ("-e", "Napraw EPUB → _moh.epub (CSS, dzielenie wyrazów)"),
             ("-q", "Walidacja wewnętrzna (qcheck)"),
@@ -378,7 +433,6 @@ class App(tk.Tk):
         # Opcje modyfikacji
         opt_sec = Section(left, "Opcje modyfikacji (z -e)")
         opt_sec.pack(fill="x", padx=6, pady=4)
-
         for flag, desc in [
             ("--skip-hyphenate",         "Pomiń dzielenie wyrazów"),
             ("--skip-hyphenate-headers", "Pomiń dzielenie w nagłówkach h1–h3"),
@@ -397,14 +451,12 @@ class App(tk.Tk):
         # Różne
         misc_sec = Section(left, "Różne")
         misc_sec.pack(fill="x", padx=6, pady=4)
-
         for flag, desc in [
             ("-m", "Tylko pliki _moh.epub (z -q lub -p)"),
             ("-f", "Force — nadpisz istniejące pliki"),
         ]:
             self._add_check(misc_sec, flag, desc)
 
-        # --book-margin
         bm_row = tk.Frame(misc_sec, bg=BG)
         bm_row.pack(fill="x", pady=2)
         self._flags["--book-margin"] = tk.BooleanVar()
@@ -413,9 +465,10 @@ class App(tk.Tk):
         self._book_margin = tk.StringVar(value="10")
         ttk.Spinbox(bm_row, from_=0, to=999, width=5,
                     textvariable=self._book_margin).pack(side="left", padx=4)
-        tk.Label(bm_row, text="px", bg=BG, fg=FG_DIM).pack(side="left")
+        dim = tk.Label(bm_row, text="px", bg=BG, fg=FG_DIM)
+        dim.pack(side="left")
+        self._label_roles[dim] = "dim"
 
-        # --replace-font-family
         ff_row = tk.Frame(misc_sec, bg=BG)
         ff_row.pack(fill="x", pady=2)
         self._flags["--replace-font-family"] = tk.BooleanVar()
@@ -428,7 +481,6 @@ class App(tk.Tk):
         paths_sec = Section(left, "Ścieżki zewnętrzne (opcjonalne)")
         paths_sec.pack(fill="x", padx=6, pady=4)
 
-        # --tools z detekcją kindlegen i epubcheck
         tk.Label(paths_sec, text="--tools (kindlegen, epubcheck):", bg=BG, fg=FG,
                  font=("Segoe UI", 9)).pack(anchor="w")
         self._tools_path = PathEntry(paths_sec, mode="dir")
@@ -442,7 +494,6 @@ class App(tk.Tk):
         self._epubcheck_lbl = tk.Label(tools_row, text="epubcheck: —",
                                        bg=BG, fg=FG_DIM, font=("Segoe UI", 8))
         self._epubcheck_lbl.pack(side="left")
-
         self._tools_path.var.trace_add("write", lambda *_: self._check_tools())
 
         for label, attr in [
@@ -458,7 +509,6 @@ class App(tk.Tk):
         # Tryb pojedynczego pliku
         single_sec = Section(left, "Tryb pojedynczego pliku (-i)")
         single_sec.pack(fill="x", padx=6, pady=4)
-
         i_row = tk.Frame(single_sec, bg=BG)
         i_row.pack(fill="x", pady=2)
         self._flags["-i"] = tk.BooleanVar()
@@ -467,12 +517,10 @@ class App(tk.Tk):
         self._single_i = tk.StringVar(value="1")
         ttk.Spinbox(i_row, from_=1, to=9999, width=6,
                     textvariable=self._single_i).pack(side="left", padx=4)
-
         tk.Label(single_sec, text="--author:", bg=BG, fg=FG,
                  font=("Segoe UI", 9)).pack(anchor="w")
         self._eq_author = ttk.Entry(single_sec)
         self._eq_author.pack(fill="x", pady=(0, 4))
-
         tk.Label(single_sec, text="--title:", bg=BG, fg=FG,
                  font=("Segoe UI", 9)).pack(anchor="w")
         self._eq_title = ttk.Entry(single_sec)
@@ -481,10 +529,8 @@ class App(tk.Tk):
         # ── Prawa: log ────────────────────────────────────────────────────────
         right = tk.Frame(paned, bg=BG)
         paned.add(right, minsize=300)
-
         ttk.Button(right, text="▶  Uruchom epubQTools", style="Accent.TButton",
                    command=self._run_epubqtools).pack(fill="x", padx=6, pady=(6, 4))
-
         log_sec = Section(right, "Log")
         log_sec.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         self._eq_log = self._make_log(log_sec)
@@ -494,11 +540,17 @@ class App(tk.Tk):
         ttk.Checkbutton(parent, variable=self._flags[flag],
                         text=f"{flag}   {desc}").pack(anchor="w", pady=1)
 
+    def _status_label(self, parent, text: str, role: str) -> tk.Label:
+        """Tworzy etykietę stanu z zapamiętaną rolą koloru (ok/err/dim)."""
+        color = {"ok": TAG_OK, "err": TAG_ERR, "dim": FG_DIM}.get(role, FG)
+        lbl = tk.Label(parent, text=text, bg=BG, fg=color, font=("Segoe UI", 8))
+        self._label_roles[lbl] = role
+        return lbl
+
     # ── Zakładka 2: Konwerter ─────────────────────────────────────────────────
 
     def _build_tab_converter(self):
         tab = self._tab_conv
-
         paned = tk.PanedWindow(tab, orient="horizontal", bg=BORDER,
                                sashwidth=4, sashrelief="flat",
                                handlepad=0, handlesize=0)
@@ -511,20 +563,28 @@ class App(tk.Tk):
         # Silnik
         eng_sec = Section(left, "Silnik konwersji")
         eng_sec.pack(fill="x", padx=6, pady=4)
+        eng_text = (f"✓ {self._conv_engine}\n{self._conv_path}" if self._conv_engine
+                    else "✗ Nie znaleziono pandoc ani calibre\nZainstaluj pandoc z pandoc.org")
+        eng_lbl = self._status_label(eng_sec, eng_text, "ok" if self._conv_engine else "err")
+        eng_lbl.configure(justify="left")
+        eng_lbl.pack(anchor="w")
 
-        if self._conv_engine:
-            eng_text = f"✓ {self._conv_engine}\n{self._conv_path}"
-            eng_color = TAG_OK
-        else:
-            eng_text = "✗ Nie znaleziono pandoc ani calibre\nZainstaluj pandoc z pandoc.org"
-            eng_color = TAG_ERR
-        tk.Label(eng_sec, text=eng_text, bg=BG, fg=eng_color,
-                 font=("Segoe UI", 8), justify="left").pack(anchor="w")
+        # Calibre viewer
+        viewer_sec = Section(left, "Podgląd EPUB")
+        viewer_sec.pack(fill="x", padx=6, pady=4)
+        vwr_text = (f"✓ ebook-viewer wykryty" if self._viewer_path
+                    else "✗ Nie znaleziono — zainstaluj Calibre")
+        vwr_lbl = self._status_label(viewer_sec, vwr_text,
+                                     "ok" if self._viewer_path else "dim")
+        vwr_lbl.pack(anchor="w", pady=(0, 4))
+        ttk.Button(viewer_sec, text="🔍 Otwórz wybrany plik w Calibre",
+                   command=self._preview_selected).pack(fill="x")
+        ttk.Button(viewer_sec, text="🔍 Otwórz ostatnio skonwertowany",
+                   command=self._preview_last).pack(fill="x", pady=(4, 0))
 
         # Metadane
         meta_sec = Section(left, "Metadane EPUB (opcjonalne)")
         meta_sec.pack(fill="x", padx=6, pady=4)
-
         for label, attr, default in [
             ("Tytuł:", "_conv_title", ""),
             ("Autor:", "_conv_author", ""),
@@ -541,27 +601,25 @@ class App(tk.Tk):
         # Katalog wyjściowy
         out_sec = Section(left, "Wyjście")
         out_sec.pack(fill="x", padx=6, pady=4)
-
         tk.Label(out_sec, text="Katalog wyjściowy:", bg=BG, fg=FG,
                  font=("Segoe UI", 9)).pack(anchor="w")
         self._conv_outdir = PathEntry(out_sec, mode="dir")
         self._conv_outdir.pack(fill="x", pady=(0, 2))
-        tk.Label(out_sec, text="(puste = obok pliku wejściowego)",
-                 bg=BG, fg=FG_DIM, font=("Segoe UI", 8)).pack(anchor="w")
+        hint = tk.Label(out_sec, text="(puste = obok pliku wejściowego)",
+                        bg=BG, fg=FG_DIM, font=("Segoe UI", 8))
+        hint.pack(anchor="w")
+        self._label_roles[hint] = "dim"
 
         # Opcje pandoc
         if self._conv_engine == "pandoc":
             po_sec = Section(left, "Opcje pandoc")
             po_sec.pack(fill="x", padx=6, pady=4)
-
             self._pandoc_toc = tk.BooleanVar()
             ttk.Checkbutton(po_sec, variable=self._pandoc_toc,
                             text="--toc   Spis treści").pack(anchor="w")
-
             self._pandoc_standalone = tk.BooleanVar(value=True)
             ttk.Checkbutton(po_sec, variable=self._pandoc_standalone,
                             text="--standalone").pack(anchor="w")
-
             tk.Label(po_sec, text="--epub-chapter-level:", bg=BG, fg=FG,
                      font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 0))
             self._pandoc_chapter = tk.StringVar(value="1")
@@ -577,18 +635,87 @@ class App(tk.Tk):
 
         conv_types = [
             ("Obsługiwane formaty",
-             "*.txt *.md *.markdown *.docx *.html *.htm *.odt *.rtf *.rst *.org *.epub *.fb2 *.tex"),
+             "*.txt *.md *.markdown *.docx *.html *.htm *.odt *.rtf "
+             "*.rst *.org *.epub *.fb2 *.tex *.mobi"),
             ("Wszystkie pliki", "*.*"),
         ]
         self._conv_files = FileList(files_sec, filetypes=conv_types)
         self._conv_files.pack(fill="both", expand=True)
 
-        ttk.Button(right, text="▶  Konwertuj do EPUB", style="Accent.TButton",
-                   command=self._run_converter).pack(fill="x", padx=6, pady=4)
+        btn_row = tk.Frame(right, bg=BG)
+        btn_row.pack(fill="x", padx=6, pady=4)
+        ttk.Button(btn_row, text="▶  Konwertuj do EPUB", style="Accent.TButton",
+                   command=self._run_converter).pack(side="left", fill="x", expand=True)
 
         log_sec = Section(right, "Log")
         log_sec.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         self._conv_log = self._make_log(log_sec)
+
+    # ── Motyw ─────────────────────────────────────────────────────────────────
+
+    def _toggle_theme(self):
+        self._dark_theme = not self._dark_theme
+        self._apply_theme(self._dark_theme)
+
+    def _apply_theme(self, dark: bool):
+        global BG, BG2, BG3, FG, FG_DIM, ACCENT, ACCENT_HV
+        global ENTRY_BG, BORDER, BTN_BG, BTN_FG, LOG_BG, LOG_FG
+        global TAG_OK, TAG_ERR, TAG_WARN
+
+        theme = DARK if dark else LIGHT
+        BG = theme["BG"]; BG2 = theme["BG2"]; BG3 = theme["BG3"]
+        FG = theme["FG"]; FG_DIM = theme["FG_DIM"]
+        ACCENT = theme["ACCENT"]; ACCENT_HV = theme["ACCENT_HV"]
+        ENTRY_BG = theme["ENTRY_BG"]; BORDER = theme["BORDER"]
+        BTN_BG = theme["BTN_BG"]; BTN_FG = theme["BTN_FG"]
+        LOG_BG = theme["LOG_BG"]; LOG_FG = theme["LOG_FG"]
+        TAG_OK = theme["TAG_OK"]; TAG_ERR = theme["TAG_ERR"]; TAG_WARN = theme["TAG_WARN"]
+
+        _setup_style(self)
+        self.configure(bg=BG)
+        self._recolor_widgets(self)
+
+        # Aktualizuj etykiety z zapamiętaną rolą koloru
+        role_colors = {"ok": TAG_OK, "err": TAG_ERR, "dim": FG_DIM}
+        for lbl, role in self._label_roles.items():
+            try:
+                lbl.configure(bg=BG, fg=role_colors.get(role, FG))
+            except Exception:
+                pass
+
+        # Odśwież dynamiczne etykiety narzędzi
+        self._check_tools()
+
+        self._theme_btn.configure(
+            text="🌙 Ciemny motyw" if not dark else "☀ Jasny motyw"
+        )
+
+    def _recolor_widgets(self, widget):
+        """Rekurencyjnie aktualizuje kolory tk.* widgetów."""
+        cls = widget.winfo_class()
+        try:
+            if cls in ("Frame", "Labelframe"):
+                widget.configure(bg=BG)
+            elif cls == "Label":
+                if widget not in self._label_roles:
+                    widget.configure(bg=BG, fg=FG)
+                else:
+                    widget.configure(bg=BG)
+            elif cls == "Text":
+                widget.configure(bg=LOG_BG, fg=LOG_FG, insertbackground=LOG_FG)
+                for tag, clr in [("ok", TAG_OK), ("err", TAG_ERR),
+                                  ("warn", TAG_WARN), ("cmd", ACCENT)]:
+                    widget.tag_configure(tag, foreground=clr)
+            elif cls == "Listbox":
+                widget.configure(bg=ENTRY_BG, fg=FG, selectbackground=ACCENT)
+            elif cls == "Canvas":
+                widget.configure(bg=BG)
+            elif cls == "PanedWindow":
+                widget.configure(bg=BORDER)
+        except Exception:
+            pass
+        for child in widget.winfo_children():
+            self._recolor_widgets(child)
 
     # ── Log ───────────────────────────────────────────────────────────────────
 
@@ -618,147 +745,54 @@ class App(tk.Tk):
         widget.delete("1.0", "end")
         widget.configure(state="disabled")
 
+    # ── Podgląd EPUB ──────────────────────────────────────────────────────────
+
+    def _preview_epub(self, path: str):
+        if not path or not Path(path).is_file():
+            messagebox.showwarning("Brak pliku", f"Plik nie istnieje:\n{path}")
+            return
+        viewer = self._viewer_path
+        if not viewer:
+            messagebox.showerror("Brak Calibre",
+                "Nie znaleziono ebook-viewer.\nZainstaluj Calibre z calibre-ebook.com.")
+            return
+        subprocess.Popen([viewer, path], creationflags=CREATE_NO_WINDOW)
+
+    def _preview_selected(self):
+        path = self._conv_files.get_selected()
+        if not path:
+            messagebox.showinfo("Brak zaznaczenia", "Zaznacz plik na liście.")
+            return
+        self._preview_epub(path)
+
+    def _preview_last(self):
+        if not self._last_converted:
+            messagebox.showinfo("Brak pliku", "Nie skonwertowano jeszcze żadnego pliku.")
+            return
+        self._preview_epub(self._last_converted)
+
     # ── Logika epubQTools ─────────────────────────────────────────────────────
 
     def _check_tools(self):
-        """Sprawdza obecność kindlegen i epubcheck w katalogu --tools."""
         path = self._tools_path.get()
         if not path or not Path(path).is_dir():
             self._kindlegen_lbl.config(text="kindlegen: —", fg=FG_DIM)
             self._epubcheck_lbl.config(text="epubcheck: —", fg=FG_DIM)
             return
-
         d = Path(path)
-
         kg_found = any((d / n).is_file() for n in ("kindlegen.exe", "kindlegen"))
         self._kindlegen_lbl.config(
             text="kindlegen: ✓" if kg_found else "kindlegen: ✗",
             fg=TAG_OK if kg_found else TAG_ERR,
         )
-
-        ec_found = (d / "epubcheck.jar").is_file()
-        if not ec_found:
-            ec_found = any(d.glob("**/epubcheck*.jar"))
+        ec_found = (d / "epubcheck.jar").is_file() or any(d.glob("**/epubcheck*.jar"))
         self._epubcheck_lbl.config(
             text="epubcheck: ✓" if ec_found else "epubcheck: ✗",
             fg=TAG_OK if ec_found else TAG_ERR,
         )
 
-    def _save_config(self):
-        """Zapisuje wszystkie ustawienia GUI do config.json."""
-        config = {
-            # epubQTools — ścieżki
-            "eq_main":        self._eq_entry.get(),
-            "py_interpreter": self._py_entry.get(),
-            "epub_dir":       self._epub_dir.get(),
-            "tools_path":     self._tools_path.get(),
-            "logs_path":      self._logs_path.get(),
-            "font_dir":       self._font_dir.get(),
-            # epubQTools — wartości
-            "book_margin":    self._book_margin.get(),
-            "font_family":    self._font_family.get(),
-            "single_i":       self._single_i.get(),
-            "eq_author":      self._eq_author.get(),
-            "eq_title":       self._eq_title.get(),
-            # epubQTools — checkboxy
-            "flags": {k: v.get() for k, v in self._flags.items()},
-            # Konwerter
-            "conv_outdir":  self._conv_outdir.get(),
-            "conv_title":   self._conv_title.get(),
-            "conv_author":  self._conv_author.get(),
-            "conv_lang":    self._conv_lang.get(),
-            # Pandoc (opcjonalne — tylko gdy wykryto)
-            "pandoc_toc":        getattr(self, "_pandoc_toc",        tk.BooleanVar()).get(),
-            "pandoc_standalone": getattr(self, "_pandoc_standalone",  tk.BooleanVar(value=True)).get(),
-            "pandoc_chapter":    getattr(self, "_pandoc_chapter",     tk.StringVar(value="1")).get(),
-            # Okno
-            "geometry": self.geometry(),
-        }
-        try:
-            _config_path().write_text(
-                json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
-        except Exception:
-            pass
-
-    def _load_config(self):
-        """Wczytuje ustawienia z config.json po zbudowaniu wszystkich widgetów."""
-        try:
-            p = _config_path()
-            if not p.is_file():
-                return
-            config = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            return
-
-        # Geometria okna
-        if geom := config.get("geometry"):
-            try:
-                self.geometry(geom)
-            except Exception:
-                pass
-
-        # Ścieżki (PathEntry)
-        for key, attr in [
-            ("eq_main",        "_eq_entry"),
-            ("py_interpreter", "_py_entry"),
-            ("epub_dir",       "_epub_dir"),
-            ("tools_path",     "_tools_path"),
-            ("logs_path",      "_logs_path"),
-            ("font_dir",       "_font_dir"),
-            ("conv_outdir",    "_conv_outdir"),
-        ]:
-            val = config.get(key, "")
-            if val:
-                getattr(self, attr).set(val)
-
-        # StringVar
-        for key, attr in [
-            ("book_margin", "_book_margin"),
-            ("font_family", "_font_family"),
-            ("single_i",    "_single_i"),
-        ]:
-            val = config.get(key)
-            if val is not None:
-                getattr(self, attr).set(val)
-
-        # Entry (tekst)
-        for key, attr in [
-            ("eq_author",  "_eq_author"),
-            ("eq_title",   "_eq_title"),
-            ("conv_title", "_conv_title"),
-            ("conv_author","_conv_author"),
-            ("conv_lang",  "_conv_lang"),
-        ]:
-            val = config.get(key, "")
-            if val:
-                e = getattr(self, attr)
-                e.delete(0, "end")
-                e.insert(0, val)
-
-        # Checkboxy (flagi epubQTools)
-        for flag, saved in config.get("flags", {}).items():
-            if flag in self._flags:
-                self._flags[flag].set(saved)
-
-        # Pandoc
-        if hasattr(self, "_pandoc_toc") and "pandoc_toc" in config:
-            self._pandoc_toc.set(config["pandoc_toc"])
-        if hasattr(self, "_pandoc_standalone") and "pandoc_standalone" in config:
-            self._pandoc_standalone.set(config["pandoc_standalone"])
-        if hasattr(self, "_pandoc_chapter") and "pandoc_chapter" in config:
-            self._pandoc_chapter.set(config["pandoc_chapter"])
-
-        # Odśwież detekcję narzędzi po wczytaniu ścieżki
-        self._check_tools()
-
-    def _on_close(self):
-        self._save_config()
-        self.destroy()
-
     def _build_q_args(self) -> list[str]:
         args = []
-
         simple = ["-a", "-n", "-q", "--list-fonts", "-p", "-m", "-e",
                   "--skip-hyphenate", "--skip-hyphenate-headers",
                   "--skip-reset-css", "--skip-justify", "--left",
@@ -768,29 +802,22 @@ class App(tk.Tk):
         for f in simple:
             if self._flags.get(f, tk.BooleanVar()).get():
                 args.append(f)
-
         if self._flags.get("--book-margin", tk.BooleanVar()).get():
             args += ["--book-margin", self._book_margin.get()]
-
         if self._flags.get("--replace-font-family", tk.BooleanVar()).get():
             args += ["--replace-font-family", self._font_family.get()]
-
         if self._flags.get("-i", tk.BooleanVar()).get():
             args += ["-i", self._single_i.get()]
-            author = self._eq_author.get().strip()
-            title  = self._eq_title.get().strip()
-            if author:
-                args += ["--author", author]
-            if title:
-                args += ["--title", title]
-
+            if self._eq_author.get().strip():
+                args += ["--author", self._eq_author.get().strip()]
+            if self._eq_title.get().strip():
+                args += ["--title", self._eq_title.get().strip()]
         if self._tools_path.get():
             args += ["--tools", self._tools_path.get()]
         if self._logs_path.get():
             args += ["-l", self._logs_path.get()]
         if self._font_dir.get():
             args += ["--font-dir", self._font_dir.get()]
-
         return args
 
     def _run_epubqtools(self):
@@ -800,27 +827,21 @@ class App(tk.Tk):
                 "Nie znaleziono __main__.py epubQTools.\n"
                 "Wskaż plik ręcznie w polu 'Ścieżka epubQTools'.")
             return
-
         epub_dir = self._epub_dir.get()
         if not epub_dir or not Path(epub_dir).is_dir():
-            messagebox.showwarning("Brak katalogu",
-                "Wskaż katalog z plikami EPUB.")
+            messagebox.showwarning("Brak katalogu", "Wskaż katalog z plikami EPUB.")
             return
-
         args = self._build_q_args()
-        action_flags = {"-e", "-q", "-p", "-n", "-a", "-k", "-d", "-t", "-z"}
-        if not any(f in args for f in action_flags):
+        if not any(f in args for f in {"-e", "-q", "-p", "-n", "-a", "-k", "-d", "-t", "-z"}):
             messagebox.showwarning("Brak akcji",
                 "Zaznacz przynajmniej jedną akcję (np. -e, -q, -p, -n).")
             return
-
         python = self._py_entry.get()
         if not python or not Path(python).is_file():
             messagebox.showerror("Błąd",
                 "Nie znaleziono interpretera Python.\n"
                 "Wskaż python.exe ręcznie w polu 'Interpreter Python'.")
             return
-
         cmd = [python, eq] + args + [epub_dir]
         self._log_clear(self._eq_log)
         self._log(self._eq_log, " ".join(cmd) + "\n", "cmd")
@@ -834,34 +855,29 @@ class App(tk.Tk):
                 "Nie znaleziono pandoc ani calibre.\n"
                 "Zainstaluj pandoc z pandoc.org lub Calibre.")
             return
-
         files = self._conv_files.get_all()
         if not files:
-            messagebox.showwarning("Brak plików",
-                "Dodaj przynajmniej jeden plik do konwersji.")
+            messagebox.showwarning("Brak plików", "Dodaj przynajmniej jeden plik do konwersji.")
             return
-
         self._log_clear(self._conv_log)
 
         def _batch():
             ok = err = 0
+            last = ""
             for f in files:
                 cmd = self._build_conv_cmd(Path(f))
-                self.after(0, self._log, self._conv_log,
-                           " ".join(cmd) + "\n", "cmd")
+                self.after(0, self._log, self._conv_log, " ".join(cmd) + "\n", "cmd")
                 try:
-                    result = subprocess.run(
-                        cmd, capture_output=True, text=True,
-                        creationflags=CREATE_NO_WINDOW,
-                    )
+                    result = subprocess.run(cmd, capture_output=True, text=True,
+                                            creationflags=CREATE_NO_WINDOW)
                     if result.stdout:
                         self.after(0, self._log, self._conv_log, result.stdout)
                     if result.stderr:
                         self.after(0, self._log, self._conv_log, result.stderr, "warn")
                     if result.returncode == 0:
-                        out = self._conv_output_path(Path(f))
-                        self.after(0, self._log, self._conv_log,
-                                   f"✓ {out}\n", "ok")
+                        out = str(self._conv_output_path(Path(f)))
+                        self.after(0, self._log, self._conv_log, f"✓ {out}\n", "ok")
+                        last = out
                         ok += 1
                     else:
                         self.after(0, self._log, self._conv_log,
@@ -870,6 +886,8 @@ class App(tk.Tk):
                 except Exception as ex:
                     self.after(0, self._log, self._conv_log, f"✗ {ex}\n", "err")
                     err += 1
+            if last:
+                self._last_converted = last
             tag = "ok" if err == 0 else "err"
             self.after(0, self._log, self._conv_log,
                        f"\nGotowe: {ok} OK, {err} błędów\n", tag)
@@ -905,7 +923,6 @@ class App(tk.Tk):
                 cmd += ["--authors", author]
             if lang:
                 cmd += ["--language", lang]
-
         return cmd
 
     def _conv_output_path(self, input_path: Path) -> Path:
@@ -929,12 +946,115 @@ class App(tk.Tk):
                 self.after(0, self._log, log,
                            f"\n▶ Zakończono (kod {proc.returncode})\n", color)
             except FileNotFoundError:
-                self.after(0, self._log, log,
-                           f"✗ Nie znaleziono: {cmd[0]}\n", "err")
+                self.after(0, self._log, log, f"✗ Nie znaleziono: {cmd[0]}\n", "err")
             except Exception as ex:
                 self.after(0, self._log, log, f"✗ {ex}\n", "err")
-
         threading.Thread(target=_run, daemon=True).start()
+
+    # ── Konfiguracja ──────────────────────────────────────────────────────────
+
+    def _save_config(self):
+        config = {
+            "eq_main":        self._eq_entry.get(),
+            "py_interpreter": self._py_entry.get(),
+            "epub_dir":       self._epub_dir.get(),
+            "tools_path":     self._tools_path.get(),
+            "logs_path":      self._logs_path.get(),
+            "font_dir":       self._font_dir.get(),
+            "book_margin":    self._book_margin.get(),
+            "font_family":    self._font_family.get(),
+            "single_i":       self._single_i.get(),
+            "eq_author":      self._eq_author.get(),
+            "eq_title":       self._eq_title.get(),
+            "flags":          {k: v.get() for k, v in self._flags.items()},
+            "conv_outdir":    self._conv_outdir.get(),
+            "conv_title":     self._conv_title.get(),
+            "conv_author":    self._conv_author.get(),
+            "conv_lang":      self._conv_lang.get(),
+            "pandoc_toc":        getattr(self, "_pandoc_toc",        tk.BooleanVar()).get(),
+            "pandoc_standalone": getattr(self, "_pandoc_standalone",  tk.BooleanVar(value=True)).get(),
+            "pandoc_chapter":    getattr(self, "_pandoc_chapter",     tk.StringVar(value="1")).get(),
+            "dark_theme":     self._dark_theme,
+            "geometry":       self.geometry(),
+        }
+        try:
+            _config_path().write_text(
+                json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+    def _load_config(self):
+        try:
+            p = _config_path()
+            if not p.is_file():
+                return
+            config = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return
+
+        if geom := config.get("geometry"):
+            try:
+                self.geometry(geom)
+            except Exception:
+                pass
+
+        for key, attr in [
+            ("eq_main",        "_eq_entry"),
+            ("py_interpreter", "_py_entry"),
+            ("epub_dir",       "_epub_dir"),
+            ("tools_path",     "_tools_path"),
+            ("logs_path",      "_logs_path"),
+            ("font_dir",       "_font_dir"),
+            ("conv_outdir",    "_conv_outdir"),
+        ]:
+            val = config.get(key, "")
+            if val:
+                getattr(self, attr).set(val)
+
+        for key, attr in [
+            ("book_margin", "_book_margin"),
+            ("font_family", "_font_family"),
+            ("single_i",    "_single_i"),
+        ]:
+            val = config.get(key)
+            if val is not None:
+                getattr(self, attr).set(val)
+
+        for key, attr in [
+            ("eq_author",  "_eq_author"),
+            ("eq_title",   "_eq_title"),
+            ("conv_title", "_conv_title"),
+            ("conv_author","_conv_author"),
+            ("conv_lang",  "_conv_lang"),
+        ]:
+            val = config.get(key, "")
+            if val:
+                e = getattr(self, attr)
+                e.delete(0, "end")
+                e.insert(0, val)
+
+        for flag, saved in config.get("flags", {}).items():
+            if flag in self._flags:
+                self._flags[flag].set(saved)
+
+        if hasattr(self, "_pandoc_toc") and "pandoc_toc" in config:
+            self._pandoc_toc.set(config["pandoc_toc"])
+        if hasattr(self, "_pandoc_standalone") and "pandoc_standalone" in config:
+            self._pandoc_standalone.set(config["pandoc_standalone"])
+        if hasattr(self, "_pandoc_chapter") and "pandoc_chapter" in config:
+            self._pandoc_chapter.set(config["pandoc_chapter"])
+
+        dark = config.get("dark_theme", True)
+        if dark != self._dark_theme:
+            self._dark_theme = dark
+            self._apply_theme(dark)
+        else:
+            self._check_tools()
+
+    def _on_close(self):
+        self._save_config()
+        self.destroy()
 
 
 # ─── Punkt wejścia ────────────────────────────────────────────────────────────
