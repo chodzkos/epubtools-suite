@@ -18,7 +18,7 @@ Gotowy plik `.exe` (bez instalacji Pythona) — sekcja [Releases](https://github
 ### Zakładka epubQTools
 - Walidacja plików EPUB narzędziem wewnętrznym (`-q`) i EpubCheck 5.x (`-p`)
 - Naprawa i dzielenie wyrazów → `_moh.epub` (`-e`)
-- Zmiana nazw plików na schemat `autor - tytuł.epub` (`-n`)
+- Zmiana nazw plików na schemat `autor - tytuł.epub` (`-n`) - poprawność zmiany zależy od metadanych zawartych w konwertowanym pliku .epub
 - Konwersja do `.mobi` przez kindlegen (`-k`) z opcjonalną kompresją huffdic (`-d`)
 - Pełna obsługa wszystkich flag CLI epubQTools
 - Automatyczna detekcja kindlegen i epubcheck ZIP w katalogu narzędzi
