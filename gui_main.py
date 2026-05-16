@@ -75,6 +75,31 @@ def _find_converter() -> tuple[str, str]:
     return "", ""
 
 
+def _find_python() -> str:
+    """Szuka systemowego python.exe — niezbędne gdy GUI działa jako skompilowany .exe."""
+    if not getattr(sys, "frozen", False):
+        return sys.executable  # uruchomiono bezpośrednio przez python.exe
+
+    # W bundlu PyInstaller sys.executable wskazuje na .exe GUI, nie na python.exe
+    for name in ("python", "python3"):
+        found = shutil.which(name)
+        if found:
+            return found
+
+    # Typowe lokalizacje na Windows
+    username = os.environ.get("USERNAME", "")
+    for ver in ("312", "311", "310", "39", "38"):
+        for base in (
+            rf"C:\Python{ver}\python.exe",
+            rf"C:\Program Files\Python{ver}\python.exe",
+            rf"C:\Users\{username}\AppData\Local\Programs\Python\Python{ver}\python.exe",
+        ):
+            if os.path.isfile(base):
+                return base
+
+    return ""
+
+
 # ─── Styl ─────────────────────────────────────────────────────────────────────
 
 def _setup_style(root: tk.Tk) -> None:
@@ -293,6 +318,22 @@ class App(tk.Tk):
         clr = TAG_OK if self._eq_path else TAG_ERR
         tk.Label(eq_sec, text=txt, bg=BG, fg=clr, font=("Segoe UI", 8)).pack(anchor="w", pady=(2, 0))
 
+        # Interpreter Python
+        py_sec = Section(left, "Interpreter Python (python.exe)")
+        py_sec.pack(fill="x", padx=6, pady=4)
+
+        py_detected = _find_python()
+        self._py_entry = PathEntry(py_sec, mode="file",
+                                   filetypes=[("Python", "*.exe"), ("Wszystkie", "*.*")])
+        self._py_entry.pack(fill="x")
+        if py_detected:
+            self._py_entry.set(py_detected)
+
+        py_txt = f"✓ Wykryto: {py_detected}" if py_detected else "✗ Nie znaleziono — wskaż python.exe ręcznie"
+        py_clr = TAG_OK if py_detected else TAG_ERR
+        tk.Label(py_sec, text=py_txt, bg=BG, fg=py_clr,
+                 font=("Segoe UI", 8)).pack(anchor="w", pady=(2, 0))
+
         # Katalog z plikami EPUB
         dir_sec = Section(left, "Katalog z plikami EPUB (wymagany)")
         dir_sec.pack(fill="x", padx=6, pady=4)
@@ -370,8 +411,24 @@ class App(tk.Tk):
         paths_sec = Section(left, "Ścieżki zewnętrzne (opcjonalne)")
         paths_sec.pack(fill="x", padx=6, pady=4)
 
+        # --tools z detekcją kindlegen i epubcheck
+        tk.Label(paths_sec, text="--tools (kindlegen, epubcheck):", bg=BG, fg=FG,
+                 font=("Segoe UI", 9)).pack(anchor="w")
+        self._tools_path = PathEntry(paths_sec, mode="dir")
+        self._tools_path.pack(fill="x", pady=(0, 2))
+
+        tools_row = tk.Frame(paths_sec, bg=BG)
+        tools_row.pack(fill="x", pady=(0, 6))
+        self._kindlegen_lbl = tk.Label(tools_row, text="kindlegen: —",
+                                       bg=BG, fg=FG_DIM, font=("Segoe UI", 8))
+        self._kindlegen_lbl.pack(side="left", padx=(0, 16))
+        self._epubcheck_lbl = tk.Label(tools_row, text="epubcheck: —",
+                                       bg=BG, fg=FG_DIM, font=("Segoe UI", 8))
+        self._epubcheck_lbl.pack(side="left")
+
+        self._tools_path.var.trace_add("write", lambda *_: self._check_tools())
+
         for label, attr in [
-            ("--tools (kindlegen, epubcheck):", "_tools_path"),
             ("-l  katalog logów:", "_logs_path"),
             ("--font-dir:", "_font_dir"),
         ]:
@@ -546,6 +603,30 @@ class App(tk.Tk):
 
     # ── Logika epubQTools ─────────────────────────────────────────────────────
 
+    def _check_tools(self):
+        """Sprawdza obecność kindlegen i epubcheck w katalogu --tools."""
+        path = self._tools_path.get()
+        if not path or not Path(path).is_dir():
+            self._kindlegen_lbl.config(text="kindlegen: —", fg=FG_DIM)
+            self._epubcheck_lbl.config(text="epubcheck: —", fg=FG_DIM)
+            return
+
+        d = Path(path)
+
+        kg_found = any((d / n).is_file() for n in ("kindlegen.exe", "kindlegen"))
+        self._kindlegen_lbl.config(
+            text="kindlegen: ✓" if kg_found else "kindlegen: ✗",
+            fg=TAG_OK if kg_found else TAG_ERR,
+        )
+
+        ec_found = (d / "epubcheck.jar").is_file()
+        if not ec_found:
+            ec_found = any(d.glob("**/epubcheck*.jar"))
+        self._epubcheck_lbl.config(
+            text="epubcheck: ✓" if ec_found else "epubcheck: ✗",
+            fg=TAG_OK if ec_found else TAG_ERR,
+        )
+
     def _build_q_args(self) -> list[str]:
         args = []
 
@@ -604,7 +685,14 @@ class App(tk.Tk):
                 "Zaznacz przynajmniej jedną akcję (np. -e, -q, -p, -n).")
             return
 
-        cmd = [sys.executable, eq] + args + [epub_dir]
+        python = self._py_entry.get()
+        if not python or not Path(python).is_file():
+            messagebox.showerror("Błąd",
+                "Nie znaleziono interpretera Python.\n"
+                "Wskaż python.exe ręcznie w polu 'Interpreter Python'.")
+            return
+
+        cmd = [python, eq] + args + [epub_dir]
         self._log_clear(self._eq_log)
         self._log(self._eq_log, " ".join(cmd) + "\n", "cmd")
         self._launch(cmd, self._eq_log)
