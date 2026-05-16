@@ -2,115 +2,131 @@
 
 Desktopowa aplikacja Windows łącząca **epubQTools** i **konwerter EPUB** w jednym oknie GUI.
 
-## Szybki start
+[![Build](https://github.com/chodzkos/epubtools-suite/actions/workflows/build.yml/badge.svg)](https://github.com/chodzkos/epubtools-suite/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/chodzkos/epubtools-suite)](https://github.com/chodzkos/epubtools-suite/releases/latest)
+
+---
+
+## Pobieranie
+
+Gotowy plik `.exe` (bez instalacji Pythona) — sekcja [Releases](https://github.com/chodzkos/epubtools-suite/releases/latest).
+
+---
+
+## Funkcje
+
+### Zakładka epubQTools
+- Walidacja plików EPUB narzędziem wewnętrznym (`-q`) i EpubCheck 5.x (`-p`)
+- Naprawa i dzielenie wyrazów → `_moh.epub` (`-e`)
+- Zmiana nazw plików na schemat `autor - tytuł.epub` (`-n`)
+- Konwersja do `.mobi` przez kindlegen (`-k`) z opcjonalną kompresją huffdic (`-d`)
+- Pełna obsługa wszystkich flag CLI epubQTools
+- Automatyczna detekcja kindlegen i epubcheck ZIP w katalogu narzędzi
+- Automatyczne wykrywanie interpretera Python
+
+### Zakładka Konwerter EPUB
+- Konwersja TXT / DOCX / HTML / MD / ODT / RTF / MOBI / FB2 / LaTeX → EPUB
+- Silnik: **Pandoc** (główny) lub **Calibre** ebook-convert (zapasowy) — wykrywany automatycznie
+- Ustawianie metadanych: tytuł, autor, język
+- Podgląd skonwertowanego pliku w Calibre viewer jednym kliknięciem
+- Drag & drop plików na listę (wymaga `tkinterdnd2`)
+
+### Ogólne
+- Motyw **jasny / ciemny** — przełącznik w górnym pasku
+- Zapamiętywanie wszystkich ustawień, ścieżek i zaznaczonych opcji (`config.json`)
+- Streaming wyjścia procesów do okna logu w czasie rzeczywistym
+- Zapis błędów do `error.txt` przy nieoczekiwanym zamknięciu
+
+---
+
+## Wymagania
+
+### Do uruchomienia skompilowanego `.exe`
+| Narzędzie | Rola | Instalacja |
+|---|---|---|
+| **Python 3.7+** | uruchamia epubQTools | [python.org](https://python.org) |
+| **Pandoc** | konwersja → EPUB | [pandoc.org](https://pandoc.org/installing.html) |
+| **Calibre** | konwersja zapasowa + podgląd EPUB | [calibre-ebook.com](https://calibre-ebook.com) |
+| **Java** | wymagana przez EpubCheck | [adoptium.net](https://adoptium.net) |
+| **epubcheck-5.x.zip** | walidacja EpubCheck | [GitHub Releases](https://github.com/w3c/epubcheck/releases) |
+| **kindlegen** | konwersja → .mobi | archiwum Amazon |
+
+### Do uruchomienia ze źródeł (dodatkowo)
+```
+pip install lxml css-parser
+pip install tkinterdnd2   # opcjonalne — drag & drop
+```
+
+---
+
+## Szybki start (ze źródeł)
 
 ```bash
-# Wymagania: Python 3.7+, tkinter, pandoc lub Calibre (do konwersji)
+git clone https://github.com/chodzkos/epubtools-suite
+cd epubtools-suite
+pip install lxml css-parser
 python gui_main.py
 ```
 
-## Build — skompilowany .exe
+---
+
+## Konfiguracja katalogu narzędzi (`--tools`)
+
+W wybranym katalogu umieść:
+```
+tools/
+├── kindlegen.exe            ← binarny plik kindlegen (bez instalacji)
+├── epubcheck-5.3.0.zip      ← ZIP pobrany z github.com/w3c/epubcheck/releases
+└── (opcjonalnie .jar itp.)
+```
+
+> **Ważne:** epubQTools wymaga pliku ZIP epubcheck — nie wypakowuj go.
+
+---
+
+## Build — skompilowany `.exe`
 
 ```bash
-pip install pyinstaller
+pip install pyinstaller tkinterdnd2
 python -m PyInstaller epubtools_suite.spec --clean
 # → dist/epubTools_Suite.exe
 ```
 
-Lub uruchom `build.bat` na Windows.  
-Push do `master` → GitHub Actions buduje `.exe` jako artefakt (30 dni).  
-Utwórz Release (`git tag v1.0.0 && git push origin v1.0.0`) → `.exe` dołączony do Release.
+Lub uruchom `build.bat` na Windows.
+
+### GitHub Actions (automatyczny build)
+
+- **Push do `master`** → buduje `.exe` jako artefakt (dostępny 30 dni w zakładce Actions)
+- **Nowy Release** → `.exe` dołączany do Release jako plik do pobrania
+
+Tworzenie nowego release:
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+gh release create v1.0.0 --repo chodzkos/epubtools-suite --title "epubTools Suite v1.0.0" --generate-notes
+```
 
 ---
 
-# epubQTools [![Release](https://img.shields.io/github/release/quiris11/epubqtools.svg)](https://github.com/quiris11/epubqtools/releases/latest)
-
-Tools for checking, correcting and hyphenating EPUB files.
-
-#### External apps used by this tool available for download:
-* **kindlegen** (only unpacked binary is needed): http://www.amazon.com/kindleformat/kindlegen
-* **epubcheck-4.0.1.zip** (Java installed is required for run it): https://github.com/IDPF/epubcheck/releases
-
+## Struktura projektu
 
 ```
-usage: epubQTools [-h] [-V] [--tools [DIR]] [-l [DIR]] [-i [NR]]
-                  [--author [Surname, First Name]] [--title [Title]]
-                  [--font-dir [DIR]] [--replace-font-family [old,new]] [-a]
-                  [-n] [-q] [-p] [--list-fonts] [-m] [-e] [--skip-hyphenate]
-                  [--skip-hyphenate-headers] [--skip-reset-css]
-                  [--skip-justify] [--left] [--replace-font-files] [--myk-fix]
-                  [--remove-colors] [--remove-fonts] [-k] [-d] [-f]
-                  [--fix-missing-container] [--book-margin [NUMBER]]
-                  directory
-
-positional arguments:
-  directory             Directory with EPUB files stored
-
-optional arguments:
-  -h, --help            show this help message and exit
-  -V, --version         show program's version number and exit
-  --tools [DIR]         path to additional tools: kindlegen, epubcheck zip
-  -l [DIR], --log [DIR]
-                        path to directory to write log file. If DIR is omitted
-                        write log to directory with epub files
-  -i [NR], --individual [NR]
-                        individual file mode
-  --author [Surname, First Name]
-                        set new author name (only with -i)
-  --title [Title]       set new book title (only with -i
-  --font-dir [DIR]      path to directory with user fonts stored
-  --replace-font-family [old,new]
-                        pair of "old_font_family,new_font_family"(only with -e
-                        and with --font-dir)
-  -a, --alter           alternative output display
-  -n, --rename          rename .epub files to 'author - title.epub'
-  -q, --qcheck          validate files with qcheck internal tool
-  -p, --epubcheck       validate epub files with EpubCheck 4 tool
-  --list-fonts          list all fonts in EPUB (only with -q)
-  -m, --mod             validate only _moh.epub files (works only with -q or
-                        -p)
-  -e, --epub            fix and hyphenate original epub files to _moh.epub
-                        files
-  --skip-hyphenate      do not hyphenate book (only with -e)
-  --skip-hyphenate-headers
-                        do not hyphenate headers like h1, h2, h3...(only with
-                        -e)
-  --skip-reset-css      skip linking a reset CSS file to every xthml file
-                        (only with -e)
-  --skip-justify        skip replacing "text-align: left" with "text-align:
-                        justify" in all CSS files (only with -e)
-  --left                replace "text-align: justify" with "text-align: left"
-                        in all CSS files (experimental) (only with -e)
-  --replace-font-files  replace font files (only with -e)
-  --myk-fix             fix for MYK conversion oddity (experimental) (only
-                        with -e)
-  --remove-colors       remove all color definitions from CSS files (only with
-                        -e)
-  --remove-fonts        remove all embedded font files (only with -e)
-  -k, --kindlegen       convert _moh.epub files to .mobi with kindlegen
-  -d, --huffdic         tell kindlegen to use huffdic compression (slow
-                        conversion) (only with -k)
-  -f, --force           overwrite previously generated _moh.epub or .mobi
-                        files (only with -k or -e)
-  --fix-missing-container
-                        Fix missing META-INF/container.xml file in original
-                        EPUB file (only with -e)
-  --book-margin [NUMBER]
-                        Add left and right book margin to reset CSS file (only
-                        with -e)
+epubtools-suite/
+├── gui_main.py               ← aplikacja GUI (Python 3.7+, tkinter)
+├── __main__.py               ← epubQTools (fork quiris11/epubQTools)
+├── lib/                      ← biblioteki epubQTools
+├── epubtools_suite.spec      ← konfiguracja PyInstaller
+├── build.bat                 ← lokalny skrypt budowania (Windows)
+├── requirements.txt          ← zależności Python
+└── .github/workflows/
+    └── build.yml             ← GitHub Actions CI/CD
 ```
 
-#### Additional requirements:
-* python -m pip install lxml
-* python -m pip install css-parser
-* python -m pip install pyinstaller (for compilation only)
+---
 
-#### Compilation tips for creating standalone applications with Pyinstaller tool:
-* build on Mac (with Python 3.7.x from Homebrew):
-```
-pyinstaller -Fn epubQTools ~/github/epubQTools/__main__.py
-```
-* build on Windows (with Python 3.7.x):
-```
-C:\Python37\Scripts\pyinstaller.exe -Fn epubQTools .\epubQTools\__main__.py
-```
+## Oparty na
+
+- [quiris11/epubQTools](https://github.com/quiris11/epubQTools) — narzędzie do przetwarzania EPUB (fork, gałąź master)
+- [Pandoc](https://pandoc.org) — konwersja dokumentów
+- [Calibre](https://calibre-ebook.com) — konwersja i podgląd EPUB
+- [EpubCheck](https://github.com/w3c/epubcheck) — walidacja EPUB
