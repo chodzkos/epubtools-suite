@@ -309,7 +309,7 @@ def main():
                 print('')
 
         for e in os.listdir(os.path.join(args.tools)):
-            if e.startswith('epubcheck-5.'):
+            if e.startswith('epubcheck-5.') and e.endswith('.zip'):
                 epubcheckstr = os.path.splitext(e)[0]
                 break
             else:

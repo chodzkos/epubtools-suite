@@ -785,7 +785,11 @@ class App(_AppBase):
             text="kindlegen: ✓" if kg_found else "kindlegen: ✗",
             fg=TAG_OK if kg_found else TAG_ERR,
         )
-        ec_found = (d / "epubcheck.jar").is_file() or any(d.glob("**/epubcheck*.jar"))
+        ec_found = (
+            any(d.glob("epubcheck-5.*.zip")) or   # epubcheck 5.x ZIP (wymagany przez epubQTools)
+            any(d.glob("epubcheck-4.*.zip")) or   # epubcheck 4.x ZIP
+            any(d.glob("epubcheck*.jar"))          # rozpakowany JAR (fallback)
+        )
         self._epubcheck_lbl.config(
             text="epubcheck: ✓" if ec_found else "epubcheck: ✗",
             fg=TAG_OK if ec_found else TAG_ERR,
