@@ -83,3 +83,9 @@
     Copyright © 2021 pmgagne / rdbende
     License: MIT
     Source:  https://github.com/pmgagne/tkinterdnd2
+
+    Pillow
+    Copyright © 2010-2024 Jeffrey A. Clark (Alex) and contributors
+    License: HPND (Historical Permission Notice and Disclaimer)
+    Source:  https://python-pillow.org
+    Used at build time only (icon generation) — not bundled in the executable.

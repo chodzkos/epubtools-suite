@@ -1,6 +1,6 @@
 # epubTools Suite
 
-Desktopowa aplikacja Windows łącząca **epubQTools** i **konwerter EPUB** w jednym oknie GUI.
+Desktopowa aplikacja Windows do pracy z plikami EPUB: walidacja, naprawa, konwersja i edycja metadanych — wszystko w jednym oknie GUI.
 
 [![Build](https://github.com/chodzkos/epubtools-suite/actions/workflows/build.yml/badge.svg)](https://github.com/chodzkos/epubtools-suite/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/chodzkos/epubtools-suite)](https://github.com/chodzkos/epubtools-suite/releases/latest)
@@ -18,11 +18,12 @@ Gotowy plik `.exe` (bez instalacji Pythona) — sekcja [Releases](https://github
 ### Zakładka epubQTools
 - Walidacja plików EPUB narzędziem wewnętrznym (`-q`) i EpubCheck 5.x (`-p`)
 - Naprawa i dzielenie wyrazów → `_moh.epub` (`-e`)
-- Zmiana nazw plików na schemat `autor - tytuł.epub` (`-n`) - poprawność zmiany zależy od metadanych zawartych w konwertowanym pliku .epub
+- Zmiana nazw plików na schemat `autor - tytuł.epub` (`-n`)
 - Konwersja do `.mobi` przez kindlegen (`-k`) z opcjonalną kompresją huffdic (`-d`)
 - Pełna obsługa wszystkich flag CLI epubQTools
 - Automatyczna detekcja kindlegen i epubcheck ZIP w katalogu narzędzi
 - Automatyczne wykrywanie interpretera Python
+- Panel plików EPUB: lista z odświeżaniem, otwieranie w Sigil / Calibre e-book editor
 
 ### Zakładka Konwerter EPUB
 - Konwersja TXT / DOCX / HTML / MD / ODT / RTF / MOBI / FB2 / LaTeX → EPUB
@@ -31,8 +32,18 @@ Gotowy plik `.exe` (bez instalacji Pythona) — sekcja [Releases](https://github
 - Podgląd skonwertowanego pliku w Calibre viewer jednym kliknięciem
 - Drag & drop plików na listę (wymaga `tkinterdnd2`)
 
+### Zakładka Metadane
+- Podgląd i edycja metadanych Dublin Core: tytuł, autor, język, wydawca, data, identyfikator (ISBN/UUID), temat, opis
+- Wiele autorów / tematów — rozdzielane średnikami
+- Skanowanie katalogu i wyświetlanie listy plików `.epub` (z odświeżaniem)
+- Drag & drop plików `.epub` na listę
+- Zapis bezpośrednio do pliku EPUB z automatyczną kopią zapasową (`.epub.bak`)
+- Odczyt i zapis bez zewnętrznych narzędzi (stdlib Python: `zipfile` + `xml.etree`)
+
 ### Ogólne
 - Motyw **jasny / ciemny** — przełącznik w górnym pasku
+- Dymki pomocy (tooltips) na wszystkich kontrolkach — wystarczy najechać kursorem
+- Ikonka programu widoczna w Eksploratorze Windows i na pasku zadań
 - Zapamiętywanie wszystkich ustawień, ścieżek i zaznaczonych opcji (`config.json`)
 - Streaming wyjścia procesów do okna logu w czasie rzeczywistym
 - Zapis błędów do `error.txt` przy nieoczekiwanym zamknięciu
@@ -50,6 +61,8 @@ Gotowy plik `.exe` (bez instalacji Pythona) — sekcja [Releases](https://github
 | **Java** | wymagana przez EpubCheck | [adoptium.net](https://adoptium.net) |
 | **epubcheck-5.x.zip** | walidacja EpubCheck | [GitHub Releases](https://github.com/w3c/epubcheck/releases) |
 | **kindlegen** | konwersja → .mobi | archiwum Amazon |
+
+Zakładka Metadane nie wymaga żadnych zewnętrznych narzędzi.
 
 ### Do uruchomienia ze źródeł (dodatkowo)
 ```
@@ -87,7 +100,8 @@ tools/
 ## Build — skompilowany `.exe`
 
 ```bash
-pip install pyinstaller tkinterdnd2
+pip install pyinstaller tkinterdnd2 Pillow
+python create_icon.py        # generuje icon.ico
 python -m PyInstaller epubtools_suite.spec --clean
 # → dist/epubTools_Suite.exe
 ```
@@ -101,25 +115,9 @@ Lub uruchom `build.bat` na Windows.
 
 Tworzenie nowego release:
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
-gh release create v1.0.0 --repo chodzkos/epubtools-suite --title "epubTools Suite v1.0.0" --generate-notes
-```
-
----
-
-## Struktura projektu
-
-```
-epubtools-suite/
-├── gui_main.py               ← aplikacja GUI (Python 3.7+, tkinter)
-├── __main__.py               ← epubQTools (fork quiris11/epubQTools)
-├── lib/                      ← biblioteki epubQTools
-├── epubtools_suite.spec      ← konfiguracja PyInstaller
-├── build.bat                 ← lokalny skrypt budowania (Windows)
-├── requirements.txt          ← zależności Python
-└── .github/workflows/
-    └── build.yml             ← GitHub Actions CI/CD
+git tag v0.8.0
+git push origin v0.8.0
+gh release create v0.8.0 --repo chodzkos/epubtools-suite --title "epubTools Suite v0.8.0" --generate-notes
 ```
 
 ---
@@ -138,6 +136,25 @@ Dzieje się tak, ponieważ plik `.exe` nie jest podpisany certyfikatem kodu (cod
 Ostrzeżenie pojawi się tylko przy pierwszym uruchomieniu danego pliku.
 
 > **Alternatywnie:** kliknij plik prawym przyciskiem myszy → **Właściwości** → zaznacz **„Odblokuj"** → OK.
+
+---
+
+## Struktura projektu
+
+```
+epubtools-suite/
+├── gui_main.py               ← aplikacja GUI (Python 3.7+, tkinter)
+├── __main__.py               ← epubQTools (fork quiris11/epubQTools)
+├── lib/                      ← biblioteki epubQTools
+├── create_icon.py            ← generator icon.ico (stdlib + Pillow)
+├── icon.ico                  ← ikonka programu
+├── epubtools_suite.spec      ← konfiguracja PyInstaller
+├── build.bat                 ← lokalny skrypt budowania (Windows)
+├── requirements.txt          ← zależności Python (build)
+├── NOTICE                    ← informacje o licencjach
+└── .github/workflows/
+    └── build.yml             ← GitHub Actions CI/CD
+```
 
 ---
 
