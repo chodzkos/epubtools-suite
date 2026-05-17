@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Generate icon
+        run: python create_icon.py
+
       - name: Build EXE
         run: python -m PyInstaller epubtools_suite.spec --clean
 
