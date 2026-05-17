@@ -1,6 +1,6 @@
 # epubTools Suite
 
-Desktopowa aplikacja Windows do pracy z plikami EPUB: walidacja, naprawa, konwersja i edycja metadanych — wszystko w jednym oknie GUI.
+Desktopowa aplikacja Windows do pracy z plikami EPUB: walidacja, naprawa, konwersja, edycja metadanych i eksport do Kindle KFX — wszystko w jednym oknie GUI.
 
 [![Build](https://github.com/chodzkos/epubtools-suite/actions/workflows/build.yml/badge.svg)](https://github.com/chodzkos/epubtools-suite/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/chodzkos/epubtools-suite)](https://github.com/chodzkos/epubtools-suite/releases/latest)
@@ -32,6 +32,14 @@ Gotowy plik `.exe` (bez instalacji Pythona) — sekcja [Releases](https://github
 - Podgląd skonwertowanego pliku w Calibre viewer jednym kliknięciem
 - Drag & drop plików na listę (wymaga `tkinterdnd2`)
 
+### Zakładka Kindle KFX
+- Konwersja EPUB → `.kfx` (format Kindle na nowszych czytnikach)
+- Silnik: **Kindle Previewer 3** (zalecany, oficjalny konwerter Amazon) lub **Calibre** z wtyczką KFX Output
+- Auto-detekcja obu silników i wtyczki KFX w katalogu Calibre
+- Opcjonalna naprawa EPUB przez epubQTools `-e` przed konwersją (domyślnie włączona)
+- Wybór katalogu wyjściowego dla plików `.kfx`
+- Drag & drop plików EPUB na listę
+
 ### Zakładka Metadane
 - Podgląd i edycja metadanych Dublin Core: tytuł, autor, język, wydawca, data, identyfikator (ISBN/UUID), temat, opis
 - Wiele autorów / tematów — rozdzielane średnikami
@@ -61,8 +69,10 @@ Gotowy plik `.exe` (bez instalacji Pythona) — sekcja [Releases](https://github
 | **Java** | wymagana przez EpubCheck | [adoptium.net](https://adoptium.net) |
 | **epubcheck-5.x.zip** | walidacja EpubCheck | [GitHub Releases](https://github.com/w3c/epubcheck/releases) |
 | **kindlegen** | konwersja → .mobi | archiwum Amazon |
+| **Kindle Previewer 3** | konwersja → .kfx | [amazon.com/kindlepreview](https://www.amazon.com/gp/feature.html?ie=UTF8&docId=1000765261) |
 
 Zakładka Metadane nie wymaga żadnych zewnętrznych narzędzi.
+Zakładka Kindle KFX wymaga Kindle Previewer 3 **lub** Calibre z wtyczką KFX Output.
 
 ### Do uruchomienia ze źródeł (dodatkowo)
 ```
@@ -115,9 +125,9 @@ Lub uruchom `build.bat` na Windows.
 
 Tworzenie nowego release:
 ```bash
-git tag v0.8.0
-git push origin v0.8.0
-gh release create v0.8.0 --repo chodzkos/epubtools-suite --title "epubTools Suite v0.8.0" --generate-notes
+git tag v0.9.0
+git push origin v0.9.0
+gh release create v0.9.0 --repo chodzkos/epubtools-suite --title "epubTools Suite v0.9.0" --generate-notes
 ```
 
 ---
@@ -164,3 +174,4 @@ epubtools-suite/
 - [Pandoc](https://pandoc.org) — konwersja dokumentów
 - [Calibre](https://calibre-ebook.com) — konwersja i podgląd EPUB
 - [EpubCheck](https://github.com/w3c/epubcheck) — walidacja EPUB
+- [KFX Output](https://www.mobileread.com/forums/showthread.php?t=272407) (wtyczka Calibre, jhowell) — konwersja do KFX przez Calibre
