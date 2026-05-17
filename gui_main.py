@@ -1674,8 +1674,14 @@ class App(_AppBase):
     # ── Konfiguracja ──────────────────────────────────────────────────────────
 
     def _save_config(self):
+        # Nie zapisuj ścieżki z tymczasowego katalogu _MEI — zmienia się przy każdym
+        # starcie .exe, więc zapisana wartość byłaby nieaktualna przy następnym uruchomieniu.
+        _eq_val = self._eq_entry.get()
+        _mei = getattr(sys, "_MEIPASS", None)
+        if _mei and _eq_val.startswith(str(Path(_mei))):
+            _eq_val = ""
         config = {
-            "eq_main":        self._eq_entry.get(),
+            "eq_main":        _eq_val,
             "py_interpreter": self._py_entry.get(),
             "epub_dir":       self._epub_dir.get(),
             "tools_path":     self._tools_path.get(),
@@ -1733,6 +1739,13 @@ class App(_AppBase):
             val = config.get(key, "")
             if val:
                 getattr(self, attr).set(val)
+
+        # Ścieżka do __main__.py z configa może być nieaktualna — PyInstaller
+        # tworzy nowy katalog _MEI przy każdym starcie .exe. Jeśli zapisana ścieżka
+        # nie istnieje, przywróć auto-wykrytą.
+        saved_eq = self._eq_entry.get()
+        if (not saved_eq or not Path(saved_eq).is_file()) and self._eq_path:
+            self._eq_entry.set(str(self._eq_path))
 
         for key, attr in [
             ("book_margin", "_book_margin"),
