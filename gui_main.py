@@ -65,7 +65,12 @@ def _find_epubqtools_main() -> Path | None:
     ]
     if getattr(sys, "_MEIPASS", None):
         mei = Path(sys._MEIPASS)
-        candidates += [mei / "__main__.py", mei / "epubQTools" / "__main__.py"]
+        # epubqtools/ — podkatalog odizolowany od .pyd PyInstallera (bez konfliktu DLL)
+        candidates += [
+            mei / "epubqtools" / "__main__.py",
+            mei / "__main__.py",
+            mei / "epubQTools" / "__main__.py",
+        ]
     try:
         import importlib.util
         spec = importlib.util.find_spec("epubQTools")

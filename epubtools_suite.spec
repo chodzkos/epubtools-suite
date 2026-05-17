@@ -4,10 +4,12 @@
 
 import os
 
-# Bundlujemy pliki epubQTools (są w tym samym katalogu — fork)
+# Bundlujemy pliki epubQTools w podkatalogu epubqtools/ — NIE w katalogu głównym _MEI.
+# Dzięki temu subprocess (dowolna wersja Pythona) nie znajdzie .pyd z Python 3.11
+# w sys.path[0] i nie dostanie błędu konfliktu DLL.
 datas = [
-    ('__main__.py', '.'),
-    ('lib',         'lib'),
+    ('__main__.py', 'epubqtools'),
+    ('lib',         'epubqtools/lib'),
     ('NOTICE',      '.'),
 ]
 
