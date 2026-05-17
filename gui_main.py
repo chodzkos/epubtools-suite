@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import threading
 import traceback
+import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -162,6 +166,147 @@ def _config_path() -> Path:
     fallback = Path.home() / ".epubtools_suite"
     fallback.mkdir(exist_ok=True)
     return fallback / "config.json"
+
+
+# ─── Obsługa metadanych EPUB ─────────────────────────────────────────────────
+
+_DC_NS  = "http://purl.org/dc/elements/1.1/"
+_OPF_NS = "http://www.idpf.org/2007/opf"
+_CNT_NS = "urn:oasis:names:tc:opendocument:xmlns:container"
+
+# Kolejność i etykiety pól metadanych
+_META_FIELDS = [
+    ("title",       "Tytuł",                    "entry"),
+    ("author",      "Autor (kilku: rozdziel ;)", "entry"),
+    ("language",    "Język (np. pl, en)",        "entry"),
+    ("publisher",   "Wydawca",                   "entry"),
+    ("date",        "Data (RRRR-MM-DD)",          "entry"),
+    ("identifier",  "Identyfikator (ISBN/UUID)",  "entry"),
+    ("subject",     "Temat / Tagi (kilka: ;)",    "entry"),
+    ("description", "Opis",                       "text"),
+]
+
+
+def _epub_opf_path(zf: zipfile.ZipFile) -> str:
+    """Zwraca ścieżkę pliku OPF wewnątrz archiwum EPUB."""
+    tree = ET.fromstring(zf.read("META-INF/container.xml"))
+    rf = tree.find(f".//{{{_CNT_NS}}}rootfile")
+    if rf is None:
+        raise ValueError("Brak rootfile w META-INF/container.xml")
+    return rf.attrib["full-path"]
+
+
+def _epub_read_metadata(epub_path: str) -> tuple[dict, str]:
+    """Czyta metadane Dublin Core z pliku EPUB.
+    Zwraca (słownik metadanych, ścieżka OPF wewnątrz ZIP)."""
+    with zipfile.ZipFile(epub_path, "r") as zf:
+        opf_path = _epub_opf_path(zf)
+        opf_bytes = zf.read(opf_path)
+
+    # Rejestruj wszystkie przestrzenie nazw — zapobiega ns0/ns1 przy serializacji
+    for m in re.finditer(rb'xmlns(?::(\w+))?=["\']([^"\']+)["\']', opf_bytes):
+        prefix = (m.group(1) or b"").decode("ascii", errors="ignore")
+        uri    = m.group(2).decode("ascii", errors="ignore")
+        try:
+            ET.register_namespace(prefix, uri)
+        except Exception:
+            pass
+
+    tree = ET.fromstring(opf_bytes)
+
+    def get(tag: str) -> str:
+        el = tree.find(f".//{{{_DC_NS}}}{tag}")
+        return (el.text or "").strip() if el is not None else ""
+
+    def get_all(tag: str) -> str:
+        els = tree.findall(f".//{{{_DC_NS}}}{tag}")
+        return "; ".join((e.text or "").strip() for e in els if e.text)
+
+    meta = {
+        "title":       get("title"),
+        "author":      get_all("creator"),
+        "language":    get("language"),
+        "publisher":   get("publisher"),
+        "date":        get("date"),
+        "identifier":  get("identifier"),
+        "subject":     get_all("subject"),
+        "description": get("description"),
+    }
+    return meta, opf_path
+
+
+def _epub_write_metadata(epub_path: str, meta: dict, opf_path: str) -> None:
+    """Zapisuje metadane do pliku EPUB; tworzy kopię zapasową .bak."""
+    with zipfile.ZipFile(epub_path, "r") as zf:
+        opf_bytes = zf.read(opf_path)
+
+        # Rejestruj przestrzenie nazw przed parsowaniem
+        for m in re.finditer(rb'xmlns(?::(\w+))?=["\']([^"\']+)["\']', opf_bytes):
+            prefix = (m.group(1) or b"").decode("ascii", errors="ignore")
+            uri    = m.group(2).decode("ascii", errors="ignore")
+            try:
+                ET.register_namespace(prefix, uri)
+            except Exception:
+                pass
+
+        tree = ET.fromstring(opf_bytes)
+
+        # Znajdź element <metadata> (może być w przestrzeni nazw OPF lub bez)
+        meta_el = (tree.find(f"{{{_OPF_NS}}}metadata")
+                   or tree.find("metadata"))
+        if meta_el is None:
+            raise ValueError("Brak elementu <metadata> w pliku OPF")
+
+        # Pola z jedną wartością
+        for key, tag in [("title",       "title"),
+                         ("language",    "language"),
+                         ("publisher",   "publisher"),
+                         ("date",        "date"),
+                         ("description", "description"),
+                         ("identifier",  "identifier")]:
+            value = meta.get(key, "").strip()
+            el = meta_el.find(f"{{{_DC_NS}}}{tag}")
+            if value:
+                if el is None:
+                    el = ET.SubElement(meta_el, f"{{{_DC_NS}}}{tag}")
+                el.text = value
+            elif el is not None:
+                meta_el.remove(el)
+
+        # Pola wielowartościowe (rozdzielone ;)
+        for key, tag in [("author", "creator"), ("subject", "subject")]:
+            value = meta.get(key, "").strip()
+            for old in meta_el.findall(f"{{{_DC_NS}}}{tag}"):
+                meta_el.remove(old)
+            if value:
+                for part in [v.strip() for v in value.split(";") if v.strip()]:
+                    ET.SubElement(meta_el, f"{{{_DC_NS}}}{tag}").text = part
+
+        # Serializuj zmodyfikowane OPF
+        enc_match = re.search(rb'encoding=["\']([^"\']+)["\']', opf_bytes)
+        encoding  = (enc_match.group(1).decode("ascii")
+                     if enc_match else "utf-8")
+        new_opf = (f'<?xml version="1.0" encoding="{encoding}"?>\n'
+                   + ET.tostring(tree, encoding="unicode"))
+
+        # Przepisz archiwum ZIP z nowym OPF
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf_out:
+            # mimetype musi być pierwszy i niekompresowany
+            if "mimetype" in zf.namelist():
+                info = zipfile.ZipInfo("mimetype")
+                info.compress_type = zipfile.ZIP_STORED
+                zf_out.writestr(info, zf.read("mimetype"))
+            for item in zf.infolist():
+                if item.filename == "mimetype":
+                    continue
+                data = (new_opf.encode(encoding)
+                        if item.filename == opf_path
+                        else zf.read(item.filename))
+                zf_out.writestr(item, data)
+
+    shutil.copy2(epub_path, epub_path + ".bak")
+    Path(epub_path).write_bytes(buf.getvalue())
 
 
 # ─── Ikonka programu ──────────────────────────────────────────────────────────
@@ -491,11 +636,14 @@ class App(_AppBase):
 
         self._tab_eq   = ttk.Frame(nb)
         self._tab_conv = ttk.Frame(nb)
+        self._tab_meta = ttk.Frame(nb)
         nb.add(self._tab_eq,   text="  epubQTools  ")
         nb.add(self._tab_conv, text="  Konwerter EPUB  ")
+        nb.add(self._tab_meta, text="  Metadane  ")
 
         self._build_tab_epubqtools()
         self._build_tab_converter()
+        self._build_tab_metadata()
         self._load_config()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -773,6 +921,148 @@ class App(_AppBase):
         self._label_roles[lbl] = role
         return lbl
 
+    # ── Zakładka 3: Metadane ──────────────────────────────────────────────────
+
+    def _build_tab_metadata(self):
+        tab = self._tab_meta
+        paned = tk.PanedWindow(tab, orient="horizontal", bg=BORDER,
+                               sashwidth=4, sashrelief="flat",
+                               handlepad=0, handlesize=0)
+        paned.pack(fill="both", expand=True)
+
+        # ── Lewa: katalog + lista plików ─────────────────────────────────────
+        left = tk.Frame(paned, bg=BG)
+        paned.add(left, width=290, minsize=220)
+
+        dir_sec = Section(left, "Katalog z plikami EPUB")
+        dir_sec.pack(fill="x", padx=6, pady=4)
+        self._meta_dir = PathEntry(dir_sec, mode="dir",
+                                   tooltip="Katalog z plikami .epub\nLista zostanie odświeżona automatycznie")
+        self._meta_dir.pack(fill="x")
+        self._meta_dir.var.trace_add("write",
+                                     lambda *_: self.after(300, self._refresh_meta_list))
+
+        epub_sec = Section(left, "Pliki EPUB")
+        epub_sec.pack(fill="both", expand=True, padx=6, pady=(0, 4))
+
+        lb_frame = tk.Frame(epub_sec, bg=BORDER)
+        lb_frame.pack(fill="both", expand=True)
+        lb_sb = ttk.Scrollbar(lb_frame, orient="vertical")
+        self._meta_lb = tk.Listbox(
+            lb_frame, bg=ENTRY_BG, fg=FG, selectbackground=ACCENT,
+            selectforeground=FG, activestyle="none",
+            font=("Consolas", 9), yscrollcommand=lb_sb.set,
+            borderwidth=0, highlightthickness=0,
+        )
+        lb_sb.config(command=self._meta_lb.yview)
+        lb_sb.pack(side="right", fill="y")
+        self._meta_lb.pack(side="left", fill="both", expand=True)
+        self._meta_lb.bind("<<ListboxSelect>>",
+                           lambda _: self.after(50, self._meta_load))
+        Tooltip(self._meta_lb,
+                "Kliknij plik, aby wyświetlić jego metadane\n"
+                "★ = plik _moh.epub\n"
+                "Możesz przeciągnąć pliki .epub na tę listę")
+
+        if HAS_DND:
+            self._meta_lb.drop_target_register(DND_FILES)
+            self._meta_lb.dnd_bind("<<Drop>>", self._on_meta_drop)
+
+        btn_bar = tk.Frame(epub_sec, bg=BG)
+        btn_bar.pack(fill="x", pady=(4, 0))
+        btn_add = ttk.Button(btn_bar, text="+ Dodaj plik",
+                             command=self._meta_add_file)
+        btn_add.pack(side="left", padx=(0, 4))
+        Tooltip(btn_add, "Otwórz okno wyboru i dodaj pojedynczy plik .epub")
+        btn_ref = ttk.Button(btn_bar, text="↺", width=3,
+                             command=self._refresh_meta_list)
+        btn_ref.pack(side="right")
+        Tooltip(btn_ref, "Odśwież listę plików z wybranego katalogu")
+
+        self._meta_count_lbl = tk.Label(epub_sec, text="", bg=BG, fg=FG_DIM,
+                                         font=("Segoe UI", 8))
+        self._meta_count_lbl.pack(anchor="w", pady=(2, 0))
+        self._label_roles[self._meta_count_lbl] = "dim"
+
+        # ── Prawa: formularz metadanych ───────────────────────────────────────
+        right = tk.Frame(paned, bg=BG)
+        paned.add(right, minsize=380)
+
+        # Etykieta aktualnie edytowanego pliku
+        self._meta_file_lbl = tk.Label(
+            right, text="(nie wybrano pliku)", bg=BG, fg=FG_DIM,
+            font=("Segoe UI", 8), anchor="w", wraplength=500)
+        self._meta_file_lbl.pack(fill="x", padx=8, pady=(6, 2))
+        self._label_roles[self._meta_file_lbl] = "dim"
+
+        # Scrollowalny obszar pól
+        meta_outer = tk.Frame(right, bg=BG)
+        meta_outer.pack(fill="both", expand=True, padx=6)
+
+        canvas_m = tk.Canvas(meta_outer, bg=BG, highlightthickness=0)
+        vsb_m = ttk.Scrollbar(meta_outer, orient="vertical", command=canvas_m.yview)
+        canvas_m.configure(yscrollcommand=vsb_m.set)
+        vsb_m.pack(side="right", fill="y")
+        canvas_m.pack(side="left", fill="both", expand=True)
+
+        fields_frame = tk.Frame(canvas_m, bg=BG)
+        win_id_m = canvas_m.create_window((0, 0), window=fields_frame, anchor="nw")
+        fields_frame.bind("<Configure>",
+                          lambda e: canvas_m.configure(
+                              scrollregion=canvas_m.bbox("all")))
+        canvas_m.bind("<Configure>",
+                      lambda e: canvas_m.itemconfig(win_id_m, width=e.width))
+        canvas_m.bind_all("<MouseWheel>",
+                          lambda e: canvas_m.yview_scroll(
+                              -1 * (e.delta // 120), "units"))
+
+        # Pola metadanych
+        self._meta_fields: dict[str, tk.StringVar | tk.Text] = {}
+        self._meta_desc_widget: tk.Text | None = None
+
+        for key, label, kind in _META_FIELDS:
+            tk.Label(fields_frame, text=label + ":", bg=BG, fg=FG,
+                     font=("Segoe UI", 9)).pack(anchor="w", padx=4, pady=(4, 0))
+            if kind == "text":
+                txt = tk.Text(fields_frame, bg=ENTRY_BG, fg=FG,
+                              insertbackground=FG, height=5,
+                              font=("Segoe UI", 9), borderwidth=1,
+                              relief="flat", wrap="word")
+                txt.pack(fill="x", padx=4, pady=(2, 0))
+                txt._entry_style = True   # oznaczenie dla _recolor_widgets
+                self._meta_fields[key] = txt
+                self._meta_desc_widget = txt
+            else:
+                var = tk.StringVar()
+                ttk.Entry(fields_frame, textvariable=var).pack(
+                    fill="x", padx=4, pady=(2, 0))
+                self._meta_fields[key] = var
+
+        # Przyciski
+        btn_frame = tk.Frame(right, bg=BG)
+        btn_frame.pack(fill="x", padx=6, pady=6)
+        btn_save = ttk.Button(btn_frame, text="💾  Zapisz metadane",
+                              style="Accent.TButton",
+                              command=self._meta_save)
+        btn_save.pack(side="left", fill="x", expand=True, padx=(0, 4))
+        Tooltip(btn_save,
+                "Zapisuje zmiany do pliku EPUB\n"
+                "Kopia zapasowa zapisywana jako .epub.bak")
+        btn_clr = ttk.Button(btn_frame, text="✕ Wyczyść",
+                             command=self._meta_clear)
+        btn_clr.pack(side="left")
+        Tooltip(btn_clr, "Czyści wszystkie pola (nie modyfikuje pliku)")
+
+        # Mały log
+        log_sec = Section(right, "Log")
+        log_sec.pack(fill="both", expand=False, padx=6, pady=(0, 6))
+        self._meta_log = self._make_log(log_sec)
+
+        # Lista ścieżek plików widocznych w listboxie
+        self._meta_files: list[str] = []
+        self._meta_current_opf: str = ""   # ścieżka OPF w aktualnym pliku
+        self._meta_current_epub: str = ""  # ścieżka do aktualnego .epub
+
     # ── Zakładka 2: Konwerter ─────────────────────────────────────────────────
 
     def _build_tab_converter(self):
@@ -892,6 +1182,124 @@ class App(_AppBase):
         log_sec.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         self._conv_log = self._make_log(log_sec)
 
+    # ── Metadane — logika ─────────────────────────────────────────────────────
+
+    def _refresh_meta_list(self):
+        """Skanuje katalog i aktualizuje listę plików EPUB."""
+        self._meta_lb.delete(0, "end")
+        self._meta_files.clear()
+        d = self._meta_dir.get()
+        if d and Path(d).is_dir():
+            files = sorted(Path(d).glob("*.epub"), key=lambda p: p.name.lower())
+            for f in files:
+                marker = "★ " if f.name.endswith("_moh.epub") else "  "
+                self._meta_lb.insert("end", marker + f.name)
+                self._meta_files.append(str(f))
+            n = len(files)
+            self._meta_count_lbl.config(text=f"{n} plików EPUB")
+        else:
+            self._meta_count_lbl.config(text="")
+
+    def _on_meta_drop(self, event):
+        """Obsługuje drag & drop plików .epub na listę metadanych."""
+        try:
+            paths = self._meta_lb.tk.splitlist(event.data)
+        except Exception:
+            paths = [event.data]
+        existing = set(self._meta_files)
+        for p in paths:
+            p = p.strip("{}")
+            if p.lower().endswith(".epub") and p not in existing:
+                name = Path(p).name
+                marker = "★ " if name.endswith("_moh.epub") else "  "
+                self._meta_lb.insert("end", marker + name)
+                self._meta_files.append(p)
+                existing.add(p)
+        self._meta_count_lbl.config(text=f"{len(self._meta_files)} plików EPUB")
+
+    def _meta_add_file(self):
+        """Dodaje pojedynczy plik .epub przez okno dialogowe."""
+        paths = filedialog.askopenfilenames(
+            filetypes=[("EPUB", "*.epub"), ("Wszystkie pliki", "*.*")])
+        existing = set(self._meta_files)
+        for p in paths:
+            if p not in existing:
+                name = Path(p).name
+                marker = "★ " if name.endswith("_moh.epub") else "  "
+                self._meta_lb.insert("end", marker + name)
+                self._meta_files.append(p)
+                existing.add(p)
+        self._meta_count_lbl.config(text=f"{len(self._meta_files)} plików EPUB")
+
+    def _meta_selected_path(self) -> str:
+        sel = self._meta_lb.curselection()
+        if not sel:
+            return ""
+        idx = sel[0]
+        return self._meta_files[idx] if idx < len(self._meta_files) else ""
+
+    def _meta_set(self, key: str, value: str):
+        w = self._meta_fields.get(key)
+        if w is None:
+            return
+        if isinstance(w, tk.StringVar):
+            w.set(value)
+        else:
+            w.configure(state="normal")
+            w.delete("1.0", "end")
+            w.insert("1.0", value)
+
+    def _meta_get(self, key: str) -> str:
+        w = self._meta_fields.get(key)
+        if w is None:
+            return ""
+        if isinstance(w, tk.StringVar):
+            return w.get().strip()
+        return w.get("1.0", "end-1c").strip()
+
+    def _meta_load(self):
+        """Wczytuje metadane zaznaczonego pliku EPUB do formularza."""
+        path = self._meta_selected_path()
+        if not path or not Path(path).is_file():
+            return
+        try:
+            meta, opf_path = _epub_read_metadata(path)
+        except Exception as ex:
+            self._log(self._meta_log, f"✗ Błąd odczytu: {ex}\n", "err")
+            return
+        for key, *_ in _META_FIELDS:
+            self._meta_set(key, meta.get(key, ""))
+        self._meta_current_epub = path
+        self._meta_current_opf  = opf_path
+        self._meta_file_lbl.config(text=str(path), fg=FG_DIM)
+        self._log(self._meta_log, f"✓ Załadowano: {Path(path).name}\n", "ok")
+
+    def _meta_save(self):
+        """Zapisuje zmiany metadanych do pliku EPUB."""
+        path = self._meta_current_epub
+        if not path or not Path(path).is_file():
+            messagebox.showwarning("Brak pliku",
+                "Najpierw zaznacz plik EPUB na liście.")
+            return
+        meta = {key: self._meta_get(key) for key, *_ in _META_FIELDS}
+        try:
+            _epub_write_metadata(path, meta, self._meta_current_opf)
+        except Exception as ex:
+            self._log(self._meta_log, f"✗ Błąd zapisu: {ex}\n", "err")
+            messagebox.showerror("Błąd zapisu", str(ex))
+            return
+        self._log(self._meta_log,
+                  f"✓ Zapisano: {Path(path).name}  "
+                  f"(kopia: {Path(path).name}.bak)\n", "ok")
+
+    def _meta_clear(self):
+        """Czyści wszystkie pola formularza."""
+        for key, *_ in _META_FIELDS:
+            self._meta_set(key, "")
+        self._meta_file_lbl.config(text="(nie wybrano pliku)", fg=FG_DIM)
+        self._meta_current_epub = ""
+        self._meta_current_opf  = ""
+
     # ── Motyw ─────────────────────────────────────────────────────────────────
 
     def _toggle_theme(self):
@@ -943,10 +1351,14 @@ class App(_AppBase):
                 else:
                     widget.configure(bg=BG)
             elif cls == "Text":
-                widget.configure(bg=LOG_BG, fg=LOG_FG, insertbackground=LOG_FG)
-                for tag, clr in [("ok", TAG_OK), ("err", TAG_ERR),
-                                  ("warn", TAG_WARN), ("cmd", ACCENT)]:
-                    widget.tag_configure(tag, foreground=clr)
+                if getattr(widget, "_entry_style", False):
+                    widget.configure(bg=ENTRY_BG, fg=FG, insertbackground=FG)
+                else:
+                    widget.configure(bg=LOG_BG, fg=LOG_FG,
+                                     insertbackground=LOG_FG)
+                    for tag, clr in [("ok", TAG_OK), ("err", TAG_ERR),
+                                      ("warn", TAG_WARN), ("cmd", ACCENT)]:
+                        widget.tag_configure(tag, foreground=clr)
             elif cls == "Listbox":
                 widget.configure(bg=ENTRY_BG, fg=FG, selectbackground=ACCENT)
             elif cls == "Canvas":
@@ -1276,6 +1688,7 @@ class App(_AppBase):
             "eq_title":       self._eq_title.get(),
             "flags":          {k: v.get() for k, v in self._flags.items()},
             "conv_outdir":    self._conv_outdir.get(),
+            "meta_dir":       self._meta_dir.get(),
             "conv_title":     self._conv_title.get(),
             "conv_author":    self._conv_author.get(),
             "conv_lang":      self._conv_lang.get(),
@@ -1315,6 +1728,7 @@ class App(_AppBase):
             ("logs_path",      "_logs_path"),
             ("font_dir",       "_font_dir"),
             ("conv_outdir",    "_conv_outdir"),
+            ("meta_dir",       "_meta_dir"),
         ]:
             val = config.get(key, "")
             if val:
@@ -1360,6 +1774,7 @@ class App(_AppBase):
         else:
             self._check_tools()
         self._refresh_epub_list()
+        self._refresh_meta_list()
 
     def _on_close(self):
         self._save_config()
