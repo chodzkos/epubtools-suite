@@ -164,6 +164,115 @@ def _config_path() -> Path:
     return fallback / "config.json"
 
 
+# ─── Ikonka programu ──────────────────────────────────────────────────────────
+
+def _create_app_icon() -> "tk.PhotoImage":
+    """Tworzy ikonkę 32×32 — otwarta książka (rysowana programowo)."""
+    img = tk.PhotoImage(width=32, height=32)
+    BG_I   = "#1b3a5c"
+    PAGE_L = "#dceeff"
+    PAGE_R = "#c8e0f8"
+    COVER  = "#0e639c"
+    SPINE  = "#063d6e"
+    LINE   = "#8dbcd8"
+
+    img.put(BG_I,   to=(0,  0,  32, 32))
+    # lewa strona
+    img.put(PAGE_L, to=(3,  8,  15, 26))
+    img.put(COVER,  to=(3,  8,   5, 26))
+    img.put(COVER,  to=(3,  8,  15, 10))
+    img.put(COVER,  to=(3, 24,  15, 26))
+    # prawa strona
+    img.put(PAGE_R, to=(17, 8,  29, 26))
+    img.put(COVER,  to=(27, 8,  29, 26))
+    img.put(COVER,  to=(17, 8,  29, 10))
+    img.put(COVER,  to=(17, 24, 29, 26))
+    # grzbiet
+    img.put(SPINE,  to=(14, 7,  18, 27))
+    # linie tekstu — lewa
+    for y in (13, 16, 19):
+        img.put(LINE, to=(6, y, 13, y + 1))
+    # linie tekstu — prawa
+    for y in (13, 16, 19):
+        img.put(LINE, to=(19, y, 27, y + 1))
+    return img
+
+
+# ─── Dymki pomocy (tooltips) ──────────────────────────────────────────────────
+
+_TIPS: dict[str, str] = {
+    "-e":  "Naprawia plik EPUB:\n• normalizuje i czyści CSS\n• wstawia miękkie myślniki (dzielenie wyrazów)\n• wynik → _moh.epub",
+    "-q":  "Szybka walidacja wewnętrzna epubQTools\nNie wymaga Java ani zewnętrznego EpubCheck",
+    "-p":  "Pełna walidacja EpubCheck\nWymaga: Java + plik epubcheck-5.x.zip w katalogu narzędzi",
+    "-n":  "Zmienia nazwy plików wg metadanych:\n<dc:creator> i <dc:title> z pliku EPUB → 'autor - tytuł.epub'",
+    "-k":  "Konwertuje _moh.epub → .mobi przez kindlegen\nWymaga kindlegen.exe w katalogu narzędzi",
+    "-d":  "Kompresja huffdic — mniejszy plik .mobi, wolniejsze ładowanie\nStosować tylko razem z -k",
+    "-t":  "Kopiuje _moh.epub jako tytuł.epub (do wysyłki na Kindle przez e-mail)",
+    "-z":  "Konwertuje .mobi → .azk (wymaga narzędzia azkcreator)",
+    "-a":  "Alternatywny układ wyjścia logów",
+    "-m":  "Przetwarzaj tylko pliki _moh.epub\nPrzydatne do walidacji już naprawionych plików",
+    "-f":  "Nadpisuje istniejące pliki wyjściowe\nBez tej opcji epubQTools pomija już istniejące pliki",
+    "-i":  "Tryb pojedynczego pliku — przetwarza plik o podanym numerze indeksu",
+    "--skip-hyphenate":         "Nie wstawiaj miękkich myślników\nPrzydatne gdy tekst jest angielski lub ma już własne dzielenie",
+    "--skip-hyphenate-headers": "Pomija dzielenie wyrazów w nagłówkach h1–h3",
+    "--skip-reset-css":         "Nie dodawaj bloku reset CSS\nUżyj gdy EPUB ma własny, dopracowany CSS",
+    "--skip-justify":           "Nie dodawaj text-align: justify\nUżyj dla poezji lub specjalnych układów",
+    "--left":                   "Wyrównanie tekstu do lewej zamiast justify\nPrzydatne dla poezji",
+    "--replace-font-files":     "Zamienia pliki fontów w EPUB\nWymaga ustawionego --font-dir",
+    "--myk-fix":                "Eksperymentalna poprawka dla konwerterów MYK — stosować ostrożnie",
+    "--remove-colors":          "Usuwa deklaracje kolorów z CSS\nPrzydatne gdy e-czytnik ma własny tryb nocny",
+    "--remove-fonts":           "Usuwa osadzone fonty — zmniejsza rozmiar EPUB\ne-czytnik używa własnych fontów",
+    "--fix-missing-container":  "Naprawia brak wymaganego pliku META-INF/container.xml",
+    "--list-fonts":             "Wyświetla listę fontów użytych w EPUB (tylko z -q)",
+    "--book-margin":            "Ustawia szerokość marginesów strony [px]",
+    "--replace-font-family":    "Zamienia rodzinę fontów w CSS\nFormat: stara_nazwa,nowa_nazwa  (np. Arial,Georgia)",
+}
+
+
+class Tooltip:
+    """Dymek pomocy wyświetlany po najechaniu kursorem na widget."""
+
+    def __init__(self, widget: tk.Widget, text: str, delay: int = 600):
+        self._widget   = widget
+        self._text     = text
+        self._delay    = delay
+        self._after_id = None
+        self._win: tk.Toplevel | None = None
+        widget.bind("<Enter>",       self._schedule, add="+")
+        widget.bind("<Leave>",       self._cancel,   add="+")
+        widget.bind("<ButtonPress>", self._cancel,   add="+")
+
+    def _schedule(self, _=None):
+        self._cancel()
+        self._after_id = self._widget.after(self._delay, self._show)
+
+    def _cancel(self, _=None):
+        if self._after_id:
+            self._widget.after_cancel(self._after_id)
+            self._after_id = None
+        self._hide()
+
+    def _show(self):
+        if self._win:
+            return
+        x = self._widget.winfo_rootx() + 12
+        y = self._widget.winfo_rooty() + self._widget.winfo_height() + 4
+        self._win = tw = tk.Toplevel(self._widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_attributes("-topmost", True)
+        tw.wm_geometry(f"+{x}+{y}")
+        tk.Label(tw, text=self._text, justify="left",
+                 background="#ffffe0", foreground="#1a1a1a",
+                 relief="solid", borderwidth=1,
+                 font=("Segoe UI", 9), wraplength=320,
+                 padx=6, pady=4).pack()
+
+    def _hide(self):
+        if self._win:
+            self._win.destroy()
+            self._win = None
+
+
 # ─── Styl ─────────────────────────────────────────────────────────────────────
 
 def _setup_style(root: tk.Tk) -> None:
@@ -212,7 +321,7 @@ class Section(ttk.LabelFrame):
 class PathEntry(tk.Frame):
     """Pole tekstowe + przycisk '…' do wyboru pliku lub katalogu."""
 
-    def __init__(self, parent, mode="dir", label="", filetypes=None, **kw):
+    def __init__(self, parent, mode="dir", label="", filetypes=None, tooltip="", **kw):
         super().__init__(parent, bg=BG, **kw)
         self._mode = mode
         self._filetypes = filetypes or [("Wszystkie pliki", "*.*")]
@@ -222,7 +331,11 @@ class PathEntry(tk.Frame):
         self.var = tk.StringVar()
         self._entry = ttk.Entry(self, textvariable=self.var)
         self._entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
-        ttk.Button(self, text="…", width=3, command=self._browse).pack(side="left")
+        btn = ttk.Button(self, text="…", width=3, command=self._browse)
+        btn.pack(side="left")
+        if tooltip:
+            Tooltip(self._entry, tooltip)
+            Tooltip(btn, tooltip)
 
     def _browse(self):
         if self._mode == "dir":
@@ -248,11 +361,22 @@ class FileList(tk.Frame):
 
         bar = tk.Frame(self, bg=BG2)
         bar.pack(fill="x")
+        _btn_tips = {
+            "+ Dodaj":  "Dodaj pliki do listy",
+            "✕ Usuń":  "Usuń zaznaczone pliki z listy",
+            "Wyczyść": "Wyczyść całą listę",
+            "↑":        "Przesuń zaznaczony plik w górę",
+            "↓":        "Przesuń zaznaczony plik w dół",
+        }
         for text, cmd in [("+ Dodaj", self._add), ("✕ Usuń", self._remove),
                           ("Wyczyść", self._clear)]:
-            ttk.Button(bar, text=text, command=cmd).pack(side="left", padx=2, pady=2)
-        ttk.Button(bar, text="↑", width=2, command=self._up).pack(side="left", padx=2, pady=2)
-        ttk.Button(bar, text="↓", width=2, command=self._down).pack(side="left", padx=2, pady=2)
+            btn = ttk.Button(bar, text=text, command=cmd)
+            btn.pack(side="left", padx=2, pady=2)
+            Tooltip(btn, _btn_tips[text])
+        for text, cmd in [("↑", self._up), ("↓", self._down)]:
+            btn = ttk.Button(bar, text=text, width=2, command=cmd)
+            btn.pack(side="left", padx=2, pady=2)
+            Tooltip(btn, _btn_tips[text])
 
         if HAS_DND:
             tk.Label(bar, text="  ⟵ przeciągnij pliki", bg=BG2, fg=FG_DIM,
@@ -347,6 +471,10 @@ class App(_AppBase):
         # Etykiety ze specjalnymi kolorami — odświeżane przy zmianie motywu
         self._label_roles: dict[tk.Label, str] = {}
 
+        # Ikonka w pasku tytułu (zachowaj referencję, żeby GC nie zebrał)
+        self._app_icon = _create_app_icon()
+        self.iconphoto(True, self._app_icon)
+
         _setup_style(self)
 
         self._eq_path = _find_epubqtools_main()
@@ -381,6 +509,7 @@ class App(_AppBase):
         self._theme_btn = ttk.Button(bar, text="☀ Jasny motyw",
                                      command=self._toggle_theme)
         self._theme_btn.pack(side="right", padx=8, pady=4)
+        Tooltip(self._theme_btn, "Przełącza między motywem ciemnym i jasnym")
 
     # ── Zakładka 1: epubQTools ────────────────────────────────────────────────
 
@@ -415,7 +544,8 @@ class App(_AppBase):
         eq_sec = Section(left, "Ścieżka epubQTools (__main__.py)")
         eq_sec.pack(fill="x", padx=6, pady=4)
         self._eq_entry = PathEntry(eq_sec, mode="file",
-                                   filetypes=[("Python", "__main__.py"), ("Wszystkie", "*.*")])
+                                   filetypes=[("Python", "__main__.py"), ("Wszystkie", "*.*")],
+                                   tooltip="Ścieżka do __main__.py epubQTools\nZazwyczaj wykrywany automatycznie (dołączony do programu)")
         self._eq_entry.pack(fill="x")
         if self._eq_path:
             self._eq_entry.set(str(self._eq_path))
@@ -429,7 +559,8 @@ class App(_AppBase):
         py_sec.pack(fill="x", padx=6, pady=4)
         py_detected = _find_python()
         self._py_entry = PathEntry(py_sec, mode="file",
-                                   filetypes=[("Python", "*.exe"), ("Wszystkie", "*.*")])
+                                   filetypes=[("Python", "*.exe"), ("Wszystkie", "*.*")],
+                                   tooltip="Ścieżka do python.exe\nNiezbędny gdy program działa jako .exe —\nwbudowany sys.executable wskazuje wtedy na .exe, nie na Python")
         self._py_entry.pack(fill="x")
         if py_detected:
             self._py_entry.set(py_detected)
@@ -441,7 +572,8 @@ class App(_AppBase):
         # Katalog z plikami EPUB
         dir_sec = Section(left, "Katalog z plikami EPUB (wymagany)")
         dir_sec.pack(fill="x", padx=6, pady=4)
-        self._epub_dir = PathEntry(dir_sec, mode="dir")
+        self._epub_dir = PathEntry(dir_sec, mode="dir",
+                                   tooltip="Katalog z plikami .epub do przetworzenia\nepubQTools przetwarza wszystkie pliki .epub z tego katalogu")
         self._epub_dir.pack(fill="x")
 
         # Akcje
@@ -513,7 +645,8 @@ class App(_AppBase):
 
         tk.Label(paths_sec, text="--tools (kindlegen, epubcheck):", bg=BG, fg=FG,
                  font=("Segoe UI", 9)).pack(anchor="w")
-        self._tools_path = PathEntry(paths_sec, mode="dir")
+        self._tools_path = PathEntry(paths_sec, mode="dir",
+                                     tooltip="Katalog z narzędziami zewnętrznymi:\n• kindlegen.exe — konwersja do .mobi\n• epubcheck-5.x.zip — walidacja EpubCheck\n\nPliki muszą znajdować się bezpośrednio w tym katalogu")
         self._tools_path.pack(fill="x", pady=(0, 2))
 
         tools_row = tk.Frame(paths_sec, bg=BG)
@@ -526,13 +659,15 @@ class App(_AppBase):
         self._epubcheck_lbl.pack(side="left")
         self._tools_path.var.trace_add("write", lambda *_: self._check_tools())
 
-        for label, attr in [
-            ("-l  katalog logów:", "_logs_path"),
-            ("--font-dir:", "_font_dir"),
+        for label, attr, tip in [
+            ("-l  katalog logów:", "_logs_path",
+             "Opcjonalny katalog, do którego epubQTools zapisuje pliki logów"),
+            ("--font-dir:", "_font_dir",
+             "Katalog z fontami do zamiany\nStosować tylko razem z --replace-font-files"),
         ]:
             tk.Label(paths_sec, text=label, bg=BG, fg=FG,
                      font=("Segoe UI", 9)).pack(anchor="w")
-            pe = PathEntry(paths_sec, mode="dir")
+            pe = PathEntry(paths_sec, mode="dir", tooltip=tip)
             pe.pack(fill="x", pady=(0, 4))
             setattr(self, attr, pe)
 
@@ -578,6 +713,10 @@ class App(_AppBase):
         lb_sb.pack(side="right", fill="y")
         self._epub_lb.pack(side="left", fill="both", expand=True)
         self._epub_lb.bind("<Double-Button-1>", lambda e: self._open_in_default_editor())
+        Tooltip(self._epub_lb,
+                "Lista plików .epub w wybranym katalogu\n"
+                "★ = plik _moh.epub (po naprawie przez -e)\n"
+                "Dwuklik = otwiera w pierwszym dostępnym edytorze")
 
         # Przyciski edytorów
         ed_bar = tk.Frame(epub_list_sec, bg=BG)
@@ -585,15 +724,21 @@ class App(_AppBase):
 
         sigil_txt  = "Sigil ✓" if self._sigil_path  else "Sigil ✗"
         caled_txt  = "Calibre editor ✓" if self._ebook_editor_path else "Calibre editor ✗"
-        sigil_st   = "TButton" if self._sigil_path  else "TButton"
-        caled_st   = "TButton" if self._ebook_editor_path else "TButton"
 
-        ttk.Button(ed_bar, text=f"✎  {sigil_txt}",
-                   command=self._open_in_sigil).pack(side="left", padx=(0, 4))
-        ttk.Button(ed_bar, text=f"✎  {caled_txt}",
-                   command=self._open_in_calibre_editor).pack(side="left", padx=(0, 4))
-        ttk.Button(ed_bar, text="↺", width=3,
-                   command=self._refresh_epub_list).pack(side="right")
+        btn_sigil = ttk.Button(ed_bar, text=f"✎  {sigil_txt}",
+                               command=self._open_in_sigil)
+        btn_sigil.pack(side="left", padx=(0, 4))
+        Tooltip(btn_sigil, "Otwiera zaznaczony plik EPUB w edytorze Sigil\nDwuklik na plik w liście też otwiera edytor")
+
+        btn_caled = ttk.Button(ed_bar, text=f"✎  {caled_txt}",
+                               command=self._open_in_calibre_editor)
+        btn_caled.pack(side="left", padx=(0, 4))
+        Tooltip(btn_caled, "Otwiera zaznaczony plik EPUB w Calibre e-book editor")
+
+        btn_ref = ttk.Button(ed_bar, text="↺", width=3,
+                             command=self._refresh_epub_list)
+        btn_ref.pack(side="right")
+        Tooltip(btn_ref, "Odświeża listę plików .epub w wybranym katalogu")
 
         self._epub_count_lbl = tk.Label(epub_list_sec, text="", bg=BG, fg=FG_DIM,
                                          font=("Segoe UI", 8))
@@ -603,8 +748,11 @@ class App(_AppBase):
         # Odśwież listę gdy zmieni się katalog
         self._epub_dir.var.trace_add("write", lambda *_: self.after(300, self._refresh_epub_list))
 
-        ttk.Button(right, text="▶  Uruchom epubQTools", style="Accent.TButton",
-                   command=self._run_epubqtools).pack(fill="x", padx=6, pady=4)
+        btn_run_eq = ttk.Button(right, text="▶  Uruchom epubQTools", style="Accent.TButton",
+                                command=self._run_epubqtools)
+        btn_run_eq.pack(fill="x", padx=6, pady=4)
+        Tooltip(btn_run_eq, "Uruchamia epubQTools z zaznaczonymi opcjami\n"
+                            "Wymagane: katalog EPUB, interpreter Python i ≥1 akcja")
 
         log_sec = Section(right, "Log")
         log_sec.pack(fill="both", expand=True, padx=6, pady=(0, 6))
@@ -612,8 +760,11 @@ class App(_AppBase):
 
     def _add_check(self, parent, flag: str, desc: str):
         self._flags[flag] = tk.BooleanVar()
-        ttk.Checkbutton(parent, variable=self._flags[flag],
-                        text=f"{flag}   {desc}").pack(anchor="w", pady=1)
+        cb = ttk.Checkbutton(parent, variable=self._flags[flag],
+                             text=f"{flag}   {desc}")
+        cb.pack(anchor="w", pady=1)
+        if flag in _TIPS:
+            Tooltip(cb, _TIPS[flag])
 
     def _status_label(self, parent, text: str, role: str) -> tk.Label:
         """Tworzy etykietę stanu z zapamiętaną rolą koloru (ok/err/dim)."""
@@ -652,10 +803,15 @@ class App(_AppBase):
         vwr_lbl = self._status_label(viewer_sec, vwr_text,
                                      "ok" if self._viewer_path else "dim")
         vwr_lbl.pack(anchor="w", pady=(0, 4))
-        ttk.Button(viewer_sec, text="🔍 Otwórz wybrany plik w Calibre",
-                   command=self._preview_selected).pack(fill="x")
-        ttk.Button(viewer_sec, text="🔍 Otwórz ostatnio skonwertowany",
-                   command=self._preview_last).pack(fill="x", pady=(4, 0))
+        btn_prev_sel = ttk.Button(viewer_sec, text="🔍 Otwórz wybrany plik w Calibre",
+                                  command=self._preview_selected)
+        btn_prev_sel.pack(fill="x")
+        Tooltip(btn_prev_sel, "Otwiera zaznaczony plik z listy w Calibre viewer")
+
+        btn_prev_last = ttk.Button(viewer_sec, text="🔍 Otwórz ostatnio skonwertowany",
+                                   command=self._preview_last)
+        btn_prev_last.pack(fill="x", pady=(4, 0))
+        Tooltip(btn_prev_last, "Otwiera ostatnio skonwertowany plik EPUB w Calibre viewer")
 
         # Metadane
         meta_sec = Section(left, "Metadane EPUB (opcjonalne)")
@@ -678,7 +834,8 @@ class App(_AppBase):
         out_sec.pack(fill="x", padx=6, pady=4)
         tk.Label(out_sec, text="Katalog wyjściowy:", bg=BG, fg=FG,
                  font=("Segoe UI", 9)).pack(anchor="w")
-        self._conv_outdir = PathEntry(out_sec, mode="dir")
+        self._conv_outdir = PathEntry(out_sec, mode="dir",
+                                      tooltip="Katalog, do którego zapisywane są skonwertowane pliki .epub\nPuste = zapisuje obok pliku wejściowego")
         self._conv_outdir.pack(fill="x", pady=(0, 2))
         hint = tk.Label(out_sec, text="(puste = obok pliku wejściowego)",
                         bg=BG, fg=FG_DIM, font=("Segoe UI", 8))
@@ -690,16 +847,22 @@ class App(_AppBase):
             po_sec = Section(left, "Opcje pandoc")
             po_sec.pack(fill="x", padx=6, pady=4)
             self._pandoc_toc = tk.BooleanVar()
-            ttk.Checkbutton(po_sec, variable=self._pandoc_toc,
-                            text="--toc   Spis treści").pack(anchor="w")
+            cb_toc = ttk.Checkbutton(po_sec, variable=self._pandoc_toc,
+                                     text="--toc   Spis treści")
+            cb_toc.pack(anchor="w")
+            Tooltip(cb_toc, "Dodaje automatyczny spis treści (Table of Contents) do EPUB")
             self._pandoc_standalone = tk.BooleanVar(value=True)
-            ttk.Checkbutton(po_sec, variable=self._pandoc_standalone,
-                            text="--standalone").pack(anchor="w")
+            cb_stand = ttk.Checkbutton(po_sec, variable=self._pandoc_standalone,
+                                       text="--standalone")
+            cb_stand.pack(anchor="w")
+            Tooltip(cb_stand, "Tworzy kompletny, samodzielny dokument EPUB z pełnym nagłówkiem")
             tk.Label(po_sec, text="--epub-chapter-level:", bg=BG, fg=FG,
                      font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 0))
             self._pandoc_chapter = tk.StringVar(value="1")
-            ttk.Spinbox(po_sec, from_=1, to=6, width=4,
-                        textvariable=self._pandoc_chapter).pack(anchor="w", pady=2)
+            sp_ch = ttk.Spinbox(po_sec, from_=1, to=6, width=4,
+                                textvariable=self._pandoc_chapter)
+            sp_ch.pack(anchor="w", pady=2)
+            Tooltip(sp_ch, "Poziom nagłówka Markdown (1–6), od którego zaczyna się nowy rozdział EPUB")
 
         # ── Prawa: pliki + log ────────────────────────────────────────────────
         right = tk.Frame(paned, bg=BG)
@@ -719,8 +882,11 @@ class App(_AppBase):
 
         btn_row = tk.Frame(right, bg=BG)
         btn_row.pack(fill="x", padx=6, pady=4)
-        ttk.Button(btn_row, text="▶  Konwertuj do EPUB", style="Accent.TButton",
-                   command=self._run_converter).pack(side="left", fill="x", expand=True)
+        btn_conv = ttk.Button(btn_row, text="▶  Konwertuj do EPUB", style="Accent.TButton",
+                              command=self._run_converter)
+        btn_conv.pack(side="left", fill="x", expand=True)
+        Tooltip(btn_conv, "Konwertuje wszystkie pliki z listy do formatu EPUB\n"
+                          "Silnik: Pandoc (główny) lub Calibre ebook-convert (zapasowy)")
 
         log_sec = Section(right, "Log")
         log_sec.pack(fill="both", expand=True, padx=6, pady=(0, 6))
