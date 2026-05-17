@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import traceback
 import zipfile
@@ -158,6 +159,51 @@ def _find_ebook_editor() -> str:
         if os.path.isfile(p):
             return p
     return ""
+
+
+def _find_kindle_previewer() -> str:
+    """Szuka Kindle Previewer 3."""
+    kp = shutil.which("KindlePreviewer")
+    if kp:
+        return kp
+    username = os.environ.get("USERNAME", "")
+    for p in [
+        r"C:\Program Files\Amazon\Kindle Previewer 3\KindlePreviewer.exe",
+        r"C:\Program Files (x86)\Amazon\Kindle Previewer 3\KindlePreviewer.exe",
+        rf"C:\Users\{username}\AppData\Local\Amazon\Kindle Previewer 3\KindlePreviewer.exe",
+    ]:
+        if os.path.isfile(p):
+            return p
+    return ""
+
+
+def _find_calibre_ebook_convert() -> str:
+    """Szuka ebook-convert Calibre (osobna od konwertera EPUB → KFX)."""
+    ec = shutil.which("ebook-convert")
+    if ec:
+        return ec
+    for p in [
+        r"C:\Program Files\Calibre2\ebook-convert.exe",
+        r"C:\Program Files (x86)\Calibre2\ebook-convert.exe",
+    ]:
+        if os.path.isfile(p):
+            return p
+    return ""
+
+
+def _calibre_has_kfx(ebook_convert: str) -> bool:
+    """Sprawdza czy Calibre ma zainstalowaną wtyczkę KFX Output."""
+    if not ebook_convert:
+        return False
+    for plugins_dir in [
+        Path.home() / "AppData" / "Roaming" / "calibre" / "plugins",
+        Path.home() / ".config" / "calibre" / "plugins",
+    ]:
+        if plugins_dir.is_dir() and any(
+            f.name.lower().startswith("kfx") for f in plugins_dir.iterdir()
+        ):
+            return True
+    return False
 
 
 def _config_path() -> Path:
@@ -632,6 +678,8 @@ class App(_AppBase):
         self._viewer_path = _find_viewer()
         self._sigil_path = _find_sigil()
         self._ebook_editor_path = _find_ebook_editor()
+        self._kfx_kp3_path = _find_kindle_previewer()
+        self._kfx_calibre_path = _find_calibre_ebook_convert()
         self._last_converted: str = ""
 
         self._build_toolbar()
@@ -642,13 +690,16 @@ class App(_AppBase):
         self._tab_eq   = ttk.Frame(nb)
         self._tab_conv = ttk.Frame(nb)
         self._tab_meta = ttk.Frame(nb)
+        self._tab_kfx  = ttk.Frame(nb)
         nb.add(self._tab_eq,   text="  epubQTools  ")
         nb.add(self._tab_conv, text="  Konwerter EPUB  ")
         nb.add(self._tab_meta, text="  Metadane  ")
+        nb.add(self._tab_kfx,  text="  Kindle KFX  ")
 
         self._build_tab_epubqtools()
         self._build_tab_converter()
         self._build_tab_metadata()
+        self._build_tab_kfx()
         self._load_config()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -1067,6 +1118,146 @@ class App(_AppBase):
         self._meta_files: list[str] = []
         self._meta_current_opf: str = ""   # ścieżka OPF w aktualnym pliku
         self._meta_current_epub: str = ""  # ścieżka do aktualnego .epub
+
+    # ── Zakładka 4: Kindle KFX ───────────────────────────────────────────────
+
+    def _build_tab_kfx(self):
+        tab = self._tab_kfx
+        paned = tk.PanedWindow(tab, orient="horizontal", bg=BORDER,
+                               sashwidth=4, sashrelief="flat",
+                               handlepad=0, handlesize=0)
+        paned.pack(fill="both", expand=True)
+
+        # ── Lewa: ustawienia ─────────────────────────────────────────────────
+        left = tk.Frame(paned, bg=BG)
+        paned.add(left, width=340, minsize=280)
+
+        # Silnik konwersji
+        eng_sec = Section(left, "Silnik konwersji")
+        eng_sec.pack(fill="x", padx=6, pady=4)
+
+        self._kfx_engine = tk.StringVar(value="kp3")
+
+        # Kindle Previewer 3
+        kp3_row = tk.Frame(eng_sec, bg=BG)
+        kp3_row.pack(fill="x")
+        ttk.Radiobutton(kp3_row, text="Kindle Previewer 3  (zalecany)",
+                        variable=self._kfx_engine, value="kp3").pack(side="left")
+        kp3_lbl = self._status_label(eng_sec,
+            "✓ Wykryto" if self._kfx_kp3_path else "✗ Nie znaleziono",
+            "ok" if self._kfx_kp3_path else "err")
+        kp3_lbl.pack(anchor="w", padx=(22, 0))
+        self._kfx_kp3_entry = PathEntry(
+            eng_sec, mode="file",
+            filetypes=[("Kindle Previewer", "KindlePreviewer.exe"), ("Exe", "*.exe")],
+            tooltip="Ścieżka do KindlePreviewer.exe\n"
+                    "Pobierz z: amazon.com/kindlepreview\n"
+                    "Typowa lokalizacja:\n"
+                    "C:\\Program Files\\Amazon\\Kindle Previewer 3\\")
+        self._kfx_kp3_entry.pack(fill="x", pady=(0, 6))
+        if self._kfx_kp3_path:
+            self._kfx_kp3_entry.set(self._kfx_kp3_path)
+
+        # Calibre KFX
+        cal_row = tk.Frame(eng_sec, bg=BG)
+        cal_row.pack(fill="x")
+        ttk.Radiobutton(cal_row, text="Calibre  (wymaga wtyczki KFX Output)",
+                        variable=self._kfx_engine, value="calibre").pack(side="left")
+        cal_has = _calibre_has_kfx(self._kfx_calibre_path)
+        if self._kfx_calibre_path:
+            cal_status = "✓ Wykryto + wtyczka KFX" if cal_has else "✓ Wykryto  (brak wtyczki KFX — konwersja nie zadziała)"
+            cal_role = "ok" if cal_has else "err"
+        else:
+            cal_status = "✗ Nie znaleziono Calibre"
+            cal_role = "err"
+        cal_lbl = self._status_label(eng_sec, cal_status, cal_role)
+        cal_lbl.pack(anchor="w", padx=(22, 0))
+        self._kfx_calibre_entry = PathEntry(
+            eng_sec, mode="file",
+            filetypes=[("ebook-convert", "ebook-convert.exe"), ("Exe", "*.exe")],
+            tooltip="Ścieżka do ebook-convert Calibre\n"
+                    "Wymaga zainstalowanej wtyczki 'KFX Output':\n"
+                    "Calibre → Preferencje → Wtyczki → Pobierz nowe wtyczki")
+        self._kfx_calibre_entry.pack(fill="x", pady=(0, 4))
+        if self._kfx_calibre_path:
+            self._kfx_calibre_entry.set(self._kfx_calibre_path)
+        lnk = tk.Label(eng_sec,
+                       text="Wtyczka KFX Output: Calibre → Preferencje → Wtyczki",
+                       bg=BG, fg=FG_DIM, font=("Segoe UI", 8))
+        lnk.pack(anchor="w")
+
+        # Katalog wyjściowy
+        out_sec = Section(left, "Katalog wyjściowy")
+        out_sec.pack(fill="x", padx=6, pady=4)
+        self._kfx_outdir = PathEntry(
+            out_sec, mode="dir",
+            tooltip="Katalog docelowy dla plików .kfx\n"
+                    "Jeśli puste — plik .kfx trafia obok pliku wejściowego")
+        self._kfx_outdir.pack(fill="x")
+        lbl_out = tk.Label(out_sec, text="(domyślnie: katalog pliku wejściowego)",
+                           bg=BG, fg=FG_DIM, font=("Segoe UI", 8))
+        lbl_out.pack(anchor="w")
+        self._label_roles[lbl_out] = "dim"
+
+        # Przygotowanie EPUB
+        prep_sec = Section(left, "Przygotowanie EPUB przed konwersją")
+        prep_sec.pack(fill="x", padx=6, pady=4)
+
+        self._kfx_fix = tk.BooleanVar(value=True)
+        fix_cb = ttk.Checkbutton(prep_sec, variable=self._kfx_fix,
+                                 text="Napraw EPUB przez epubQTools -e")
+        fix_cb.pack(anchor="w")
+        Tooltip(fix_cb,
+                "Uruchamia epubQTools -e przed konwersją:\n"
+                "• normalizuje i czyści CSS\n"
+                "• wstawia miękkie myślniki\n"
+                "• naprawia typowe błędy struktury\n\n"
+                "Konwerter KFX jest wymagający — naprawa znacząco\n"
+                "zwiększa szansę powodzenia konwersji.\n\n"
+                "Wymaga: skonfigurowanego Python i epubQTools\n"
+                "(zakładka epubQTools).")
+
+        self._kfx_cleanup = tk.BooleanVar(value=True)
+        cleanup_cb = ttk.Checkbutton(prep_sec, variable=self._kfx_cleanup,
+                                     text="Usuń plik _moh.epub po konwersji")
+        cleanup_cb.pack(anchor="w")
+        Tooltip(cleanup_cb,
+                "Usuwa tymczasowy _moh.epub po zakończeniu konwersji\n"
+                "Odznacz, jeśli chcesz zachować naprawiony EPUB")
+
+        info = tk.Label(prep_sec,
+                        text="Konwerter KFX często odrzuca nieprawidłowe EPUB.\n"
+                             "Zaleca się zawsze naprawiać przed konwersją.",
+                        bg=BG, fg=FG_DIM, font=("Segoe UI", 8),
+                        wraplength=280, justify="left")
+        info.pack(anchor="w", pady=(6, 0))
+        self._label_roles[info] = "dim"
+
+        # ── Prawa: lista plików + log ─────────────────────────────────────────
+        right = tk.Frame(paned, bg=BG)
+        paned.add(right, minsize=340)
+
+        files_sec = Section(right, "Pliki EPUB do konwersji")
+        files_sec.pack(fill="both", expand=True, padx=6, pady=(6, 2))
+        self._kfx_files = FileList(files_sec,
+                                   filetypes=[("EPUB", "*.epub"), ("Wszystkie", "*.*")])
+        self._kfx_files.pack(fill="both", expand=True)
+        Tooltip(self._kfx_files._lb,
+                "Lista plików .epub do konwersji do formatu KFX\n"
+                "Przeciągnij pliki lub użyj '+ Dodaj'\n"
+                "Wskazówka: możesz dodać pliki _moh.epub (już naprawione)")
+
+        btn_run = ttk.Button(right, text="▶  Konwertuj do KFX",
+                             style="Accent.TButton", command=self._run_kfx)
+        btn_run.pack(fill="x", padx=6, pady=4)
+        Tooltip(btn_run,
+                "Konwertuje wszystkie pliki z listy do formatu .kfx\n"
+                "Jeśli zaznaczono naprawę — najpierw uruchamia epubQTools -e\n"
+                "Każdy plik przetwarzany jest sekwencyjnie")
+
+        log_sec = Section(right, "Log")
+        log_sec.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self._kfx_log = self._make_log(log_sec)
 
     # ── Zakładka 2: Konwerter ─────────────────────────────────────────────────
 
@@ -1492,6 +1683,143 @@ class App(_AppBase):
             messagebox.showinfo("Brak edytora",
                 "Nie znaleziono Sigil ani Calibre e-book editor.")
 
+    # ── Logika Kindle KFX ────────────────────────────────────────────────────
+
+    def _run_kfx(self):
+        engine = self._kfx_engine.get()
+        if engine == "kp3":
+            kp3 = self._kfx_kp3_entry.get()
+            if not kp3 or not Path(kp3).is_file():
+                messagebox.showerror("Brak silnika",
+                    "Wskaż ścieżkę do Kindle Previewer 3 (KindlePreviewer.exe).\n"
+                    "Pobierz ze strony Amazon: amazon.com/kindlepreview")
+                return
+        else:
+            ec = self._kfx_calibre_entry.get()
+            if not ec or not Path(ec).is_file():
+                messagebox.showerror("Brak silnika",
+                    "Wskaż ścieżkę do ebook-convert Calibre.")
+                return
+
+        files = self._kfx_files.get_all()
+        if not files:
+            messagebox.showwarning("Brak plików",
+                "Dodaj przynajmniej jeden plik EPUB do listy.")
+            return
+
+        self._log_clear(self._kfx_log)
+        threading.Thread(target=self._kfx_batch, daemon=True).start()
+
+    def _kfx_batch(self):
+        files = self._kfx_files.get_all()
+        ok = err = 0
+        for f in files:
+            if self._kfx_convert_one(Path(f)):
+                ok += 1
+            else:
+                err += 1
+        tag = "ok" if err == 0 else "err"
+        self.after(0, self._log, self._kfx_log,
+                   f"\nGotowe: {ok} OK, {err} błędów\n", tag)
+
+    def _kfx_convert_one(self, epub_path: Path) -> bool:
+        tmp_dir: Path | None = None
+        input_path = epub_path
+
+        # --- Opcjonalna naprawa przez epubQTools -e ---
+        if self._kfx_fix.get():
+            eq = self._eq_entry.get() or (str(self._eq_path) if self._eq_path else "")
+            python = self._py_entry.get()
+            if not eq or not Path(eq).is_file() or not python or not Path(python).is_file():
+                self.after(0, self._log, self._kfx_log,
+                           "⚠ Brak epubQTools lub Python — pomijam naprawę\n", "warn")
+            else:
+                tmp_dir = Path(tempfile.mkdtemp(prefix="epubkfx_"))
+                shutil.copy2(str(epub_path), str(tmp_dir / epub_path.name))
+                cmd = [python, eq, "-e", str(tmp_dir)]
+                self.after(0, self._log, self._kfx_log,
+                           f"⚙ Naprawa: {epub_path.name} …\n")
+                subprocess.run(cmd, capture_output=True, text=True,
+                               creationflags=CREATE_NO_WINDOW)
+                moh = tmp_dir / (epub_path.stem + "_moh.epub")
+                if moh.is_file():
+                    input_path = moh
+                    self.after(0, self._log, self._kfx_log,
+                               f"✓ Naprawiono → {moh.name}\n", "ok")
+                else:
+                    self.after(0, self._log, self._kfx_log,
+                               "⚠ _moh.epub nie powstał — konwertuję oryginał\n", "warn")
+
+        # --- Katalog wyjściowy ---
+        out_dir_str = self._kfx_outdir.get()
+        out_dir = Path(out_dir_str) if out_dir_str else epub_path.parent
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # --- Konwersja ---
+        engine = self._kfx_engine.get()
+        success = False
+
+        if engine == "kp3":
+            # KP3 tworzy własną strukturę w katalogu wyjściowym — używamy osobnego temp
+            kp3_tmp = Path(tempfile.mkdtemp(prefix="epubkfx_out_"))
+            try:
+                kp3 = self._kfx_kp3_entry.get()
+                cmd = [kp3, str(input_path), "-convert", "-output_dir", str(kp3_tmp)]
+                self.after(0, self._log, self._kfx_log, " ".join(cmd) + "\n", "cmd")
+                result = subprocess.run(cmd, capture_output=True, text=True,
+                                        creationflags=CREATE_NO_WINDOW, timeout=300)
+                if result.stdout:
+                    self.after(0, self._log, self._kfx_log, result.stdout)
+                if result.stderr:
+                    self.after(0, self._log, self._kfx_log, result.stderr, "warn")
+                # KP3 może umieścić .kfx w podkatalogu — szukamy rekurencyjnie
+                kfx_found = list(kp3_tmp.rglob("*.kfx"))
+                if kfx_found:
+                    dest = out_dir / (epub_path.stem + ".kfx")
+                    shutil.move(str(kfx_found[0]), str(dest))
+                    self.after(0, self._log, self._kfx_log, f"✓ {dest}\n", "ok")
+                    success = True
+                else:
+                    self.after(0, self._log, self._kfx_log,
+                               "✗ Nie znaleziono pliku .kfx w katalogu wyjściowym\n", "err")
+            except subprocess.TimeoutExpired:
+                self.after(0, self._log, self._kfx_log,
+                           "✗ Przekroczono czas oczekiwania (5 min)\n", "err")
+            except Exception as ex:
+                self.after(0, self._log, self._kfx_log, f"✗ {ex}\n", "err")
+            finally:
+                shutil.rmtree(str(kp3_tmp), ignore_errors=True)
+
+        else:  # calibre
+            ec = self._kfx_calibre_entry.get()
+            dest = out_dir / (epub_path.stem + ".kfx")
+            cmd = [ec, str(input_path), str(dest)]
+            self.after(0, self._log, self._kfx_log, " ".join(cmd) + "\n", "cmd")
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True,
+                                        creationflags=CREATE_NO_WINDOW, timeout=300)
+                if result.stdout:
+                    self.after(0, self._log, self._kfx_log, result.stdout)
+                if result.stderr:
+                    self.after(0, self._log, self._kfx_log, result.stderr, "warn")
+                if result.returncode == 0 and dest.is_file():
+                    self.after(0, self._log, self._kfx_log, f"✓ {dest}\n", "ok")
+                    success = True
+                else:
+                    self.after(0, self._log, self._kfx_log,
+                               f"✗ Błąd konwersji Calibre (kod {result.returncode})\n", "err")
+            except subprocess.TimeoutExpired:
+                self.after(0, self._log, self._kfx_log,
+                           "✗ Przekroczono czas oczekiwania (5 min)\n", "err")
+            except Exception as ex:
+                self.after(0, self._log, self._kfx_log, f"✗ {ex}\n", "err")
+
+        # --- Cleanup tymczasowego katalogu z naprawą ---
+        if tmp_dir:
+            shutil.rmtree(str(tmp_dir), ignore_errors=True)
+
+        return success
+
     # ── Logika epubQTools ─────────────────────────────────────────────────────
 
     def _check_tools(self):
@@ -1700,6 +2028,12 @@ class App(_AppBase):
             "flags":          {k: v.get() for k, v in self._flags.items()},
             "conv_outdir":    self._conv_outdir.get(),
             "meta_dir":       self._meta_dir.get(),
+            "kfx_kp3":        self._kfx_kp3_entry.get(),
+            "kfx_calibre":    self._kfx_calibre_entry.get(),
+            "kfx_outdir":     self._kfx_outdir.get(),
+            "kfx_engine":     self._kfx_engine.get(),
+            "kfx_fix":        self._kfx_fix.get(),
+            "kfx_cleanup":    self._kfx_cleanup.get(),
             "conv_title":     self._conv_title.get(),
             "conv_author":    self._conv_author.get(),
             "conv_lang":      self._conv_lang.get(),
@@ -1740,10 +2074,20 @@ class App(_AppBase):
             ("font_dir",       "_font_dir"),
             ("conv_outdir",    "_conv_outdir"),
             ("meta_dir",       "_meta_dir"),
+            ("kfx_kp3",        "_kfx_kp3_entry"),
+            ("kfx_calibre",    "_kfx_calibre_entry"),
+            ("kfx_outdir",     "_kfx_outdir"),
         ]:
             val = config.get(key, "")
             if val:
                 getattr(self, attr).set(val)
+
+        if "kfx_engine" in config:
+            self._kfx_engine.set(config["kfx_engine"])
+        if "kfx_fix" in config:
+            self._kfx_fix.set(config["kfx_fix"])
+        if "kfx_cleanup" in config:
+            self._kfx_cleanup.set(config["kfx_cleanup"])
 
         # Ścieżka do __main__.py z configa może być nieaktualna — PyInstaller
         # tworzy nowy katalog _MEI przy każdym starcie .exe. Jeśli zapisana ścieżka
