@@ -1360,11 +1360,19 @@ class App(_AppBase):
         conv_types = [
             ("Obsługiwane formaty",
              "*.txt *.md *.markdown *.docx *.html *.htm *.odt *.rtf "
-             "*.rst *.org *.epub *.fb2 *.tex *.mobi"),
+             "*.rst *.org *.epub *.fb2 *.tex *.mobi *.pdf"),
+            ("PDF", "*.pdf"),
             ("Wszystkie pliki", "*.*"),
         ]
         self._conv_files = FileList(files_sec, filetypes=conv_types)
         self._conv_files.pack(fill="both", expand=True)
+
+        pdf_note = tk.Label(files_sec,
+                            text="⚠ PDF wymaga Calibre (ebook-convert) — Pandoc nie obsługuje PDF.",
+                            bg=BG, fg=FG_DIM, font=("Segoe UI", 8),
+                            wraplength=340, justify="left")
+        pdf_note.pack(anchor="w", pady=(2, 0))
+        self._label_roles[pdf_note] = "dim"
 
         btn_row = tk.Frame(right, bg=BG)
         btn_row.pack(fill="x", padx=6, pady=4)
@@ -1912,6 +1920,15 @@ class App(_AppBase):
         if not files:
             messagebox.showwarning("Brak plików", "Dodaj przynajmniej jeden plik do konwersji.")
             return
+        # PDF wymaga Calibre — sprawdź czy jest dostępne
+        has_pdf = any(Path(f).suffix.lower() == ".pdf" for f in files)
+        calibre_avail = self._conv_engine == "calibre" or bool(self._kfx_calibre_path)
+        if has_pdf and not calibre_avail:
+            messagebox.showerror("Brak Calibre",
+                "Konwersja PDF → EPUB wymaga Calibre (ebook-convert).\n"
+                "Pandoc nie obsługuje plików PDF.\n\n"
+                "Zainstaluj Calibre z calibre-ebook.com.")
+            return
         self._log_clear(self._conv_log)
 
         def _batch():
@@ -1953,7 +1970,10 @@ class App(_AppBase):
         author = self._conv_author.get().strip()
         lang   = self._conv_lang.get().strip()
 
-        if self._conv_engine == "pandoc":
+        # PDF nie jest obsługiwany przez Pandoc — wymuś Calibre
+        force_calibre = input_path.suffix.lower() == ".pdf"
+
+        if self._conv_engine == "pandoc" and not force_calibre:
             cmd = [self._conv_path, str(input_path), "-o", str(out)]
             if getattr(self, "_pandoc_standalone", None) and self._pandoc_standalone.get():
                 cmd.append("--standalone")
@@ -1969,7 +1989,10 @@ class App(_AppBase):
             if lang:
                 cmd += ["--metadata", f"lang={lang}"]
         else:
-            cmd = [self._conv_path, str(input_path), str(out)]
+            # Calibre: bezpośrednio lub jako fallback dla PDF przy silniku Pandoc
+            calibre_path = (self._conv_path if self._conv_engine == "calibre"
+                            else self._kfx_calibre_path)
+            cmd = [calibre_path, str(input_path), str(out)]
             if title:
                 cmd += ["--title", title]
             if author:
