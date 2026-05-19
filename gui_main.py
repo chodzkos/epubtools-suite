@@ -1797,15 +1797,20 @@ class App(_AppBase):
                     self.after(0, self._log, self._kfx_log,
                                "⚠ Wykryto plik .BAT zamiast .exe — konwersja może nie działać.\n"
                                "  Wskaż bezpośrednio KindlePreviewer.exe w polu ścieżki.\n", "warn")
+                # KP3 nie obsługuje znaków spoza ASCII w ścieżce — kopiujemy do temp jako input.epub
+                kp3_in = kp3_tmp / "input.epub"
+                shutil.copy2(str(input_path), str(kp3_in))
                 # KP3 używa flagi -output (nie -output_dir)
-                cmd = [kp3, str(input_path), "-convert", "-output", str(kp3_tmp)]
+                cmd = [kp3, str(kp3_in), "-convert", "-output", str(kp3_tmp)]
                 self.after(0, self._log, self._kfx_log, " ".join(cmd) + "\n", "cmd")
-                result = subprocess.run(cmd, capture_output=True, text=True,
+                result = subprocess.run(cmd, capture_output=True,
                                         creationflags=CREATE_NO_WINDOW, timeout=300)
                 if result.stdout:
-                    self.after(0, self._log, self._kfx_log, result.stdout)
+                    self.after(0, self._log, self._kfx_log,
+                               result.stdout.decode("utf-8", errors="replace"))
                 if result.stderr:
-                    self.after(0, self._log, self._kfx_log, result.stderr, "warn")
+                    self.after(0, self._log, self._kfx_log,
+                               result.stderr.decode("utf-8", errors="replace"), "warn")
                 # KP3 tworzy .kpf (nowsze wersje) lub .kfx (starsze) w podkatalogu
                 out_file = None
                 for pattern in ["*.kpf", "*.kfx"]:
