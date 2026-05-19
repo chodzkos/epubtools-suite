@@ -1826,14 +1826,28 @@ class App(_AppBase):
                     self.after(0, self._log, self._kfx_log, f"✓ {dest}\n", "ok")
                     success = True
                 else:
-                    # pokaż logi KP3 — zawierają przyczynę błędu konwersji
-                    for log_file in sorted(kp3_out.rglob("*.txt")):
-                        try:
-                            content = log_file.read_text(encoding="utf-8", errors="replace")
+                    # wylistuj wszystkie pliki w katalogu wyjściowym (diagnostyka)
+                    all_out = [f for f in kp3_out.rglob("*") if f.is_file()]
+                    if all_out:
+                        self.after(0, self._log, self._kfx_log,
+                                   "Pliki w katalogu wyjściowym KP3:\n", "warn")
+                        for f in sorted(all_out):
                             self.after(0, self._log, self._kfx_log,
-                                       f"\n--- log KP3: {log_file.name} ---\n{content}\n", "warn")
-                        except Exception:
-                            pass
+                                       f"  {f.relative_to(kp3_out)}\n", "warn")
+                        # próbuj odczytać pliki tekstowe (log, txt, html)
+                        for log_file in sorted(all_out):
+                            if log_file.suffix.lower() in {".log", ".txt", ".html", ".htm"}:
+                                try:
+                                    content = log_file.read_text(encoding="utf-8", errors="replace")
+                                    if content.strip():
+                                        self.after(0, self._log, self._kfx_log,
+                                                   f"\n--- {log_file.name} ---\n{content}\n", "warn")
+                                except Exception:
+                                    pass
+                    else:
+                        self.after(0, self._log, self._kfx_log,
+                                   "Katalog wyjściowy KP3 jest pusty — KP3 mógł zapisać\n"
+                                   "logi we własnym katalogu AppData.\n", "warn")
                     self.after(0, self._log, self._kfx_log,
                                "✗ Nie znaleziono pliku .kpf/.kfx w katalogu wyjściowym\n", "err")
             except subprocess.TimeoutExpired:
