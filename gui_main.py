@@ -1787,8 +1787,10 @@ class App(_AppBase):
         success = False
 
         if engine == "kp3":
-            # KP3 tworzy własną strukturę w katalogu wyjściowym — używamy osobnego temp
-            kp3_tmp = Path(tempfile.mkdtemp(prefix="epubkfx_out_"))
+            # osobny katalog dla pliku wejściowego (input) i wyjściowego (output)
+            # — trzymanie ich razem może dezorientować KP3
+            kp3_in_dir = Path(tempfile.mkdtemp(prefix="epubkfx_in_"))
+            kp3_out = Path(tempfile.mkdtemp(prefix="epubkfx_out_"))
             try:
                 kp3 = self._kfx_kp3_entry.get()
                 # .bat może startować KP3 asynchronicznie — subprocess.run skończy się
@@ -1797,11 +1799,11 @@ class App(_AppBase):
                     self.after(0, self._log, self._kfx_log,
                                "⚠ Wykryto plik .BAT zamiast .exe — konwersja może nie działać.\n"
                                "  Wskaż bezpośrednio KindlePreviewer.exe w polu ścieżki.\n", "warn")
-                # KP3 nie obsługuje znaków spoza ASCII w ścieżce — kopiujemy do temp jako input.epub
-                kp3_in = kp3_tmp / "input.epub"
+                # KP3 nie obsługuje znaków spoza ASCII w ścieżce — kopiujemy jako input.epub
+                kp3_in = kp3_in_dir / "input.epub"
                 shutil.copy2(str(input_path), str(kp3_in))
                 # KP3 używa flagi -output (nie -output_dir)
-                cmd = [kp3, str(kp3_in), "-convert", "-output", str(kp3_tmp)]
+                cmd = [kp3, str(kp3_in), "-convert", "-output", str(kp3_out)]
                 self.after(0, self._log, self._kfx_log, " ".join(cmd) + "\n", "cmd")
                 result = subprocess.run(cmd, capture_output=True,
                                         creationflags=CREATE_NO_WINDOW, timeout=300)
@@ -1814,7 +1816,7 @@ class App(_AppBase):
                 # KP3 tworzy .kpf (nowsze wersje) lub .kfx (starsze) w podkatalogu
                 out_file = None
                 for pattern in ["*.kpf", "*.kfx"]:
-                    found = list(kp3_tmp.rglob(pattern))
+                    found = list(kp3_out.rglob(pattern))
                     if found:
                         out_file = found[0]
                         break
@@ -1824,6 +1826,14 @@ class App(_AppBase):
                     self.after(0, self._log, self._kfx_log, f"✓ {dest}\n", "ok")
                     success = True
                 else:
+                    # pokaż logi KP3 — zawierają przyczynę błędu konwersji
+                    for log_file in sorted(kp3_out.rglob("*.txt")):
+                        try:
+                            content = log_file.read_text(encoding="utf-8", errors="replace")
+                            self.after(0, self._log, self._kfx_log,
+                                       f"\n--- log KP3: {log_file.name} ---\n{content}\n", "warn")
+                        except Exception:
+                            pass
                     self.after(0, self._log, self._kfx_log,
                                "✗ Nie znaleziono pliku .kpf/.kfx w katalogu wyjściowym\n", "err")
             except subprocess.TimeoutExpired:
@@ -1832,7 +1842,8 @@ class App(_AppBase):
             except Exception as ex:
                 self.after(0, self._log, self._kfx_log, f"✗ {ex}\n", "err")
             finally:
-                shutil.rmtree(str(kp3_tmp), ignore_errors=True)
+                shutil.rmtree(str(kp3_in_dir), ignore_errors=True)
+                shutil.rmtree(str(kp3_out), ignore_errors=True)
 
         else:  # calibre
             ec = self._kfx_calibre_entry.get()
