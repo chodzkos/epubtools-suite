@@ -1813,9 +1813,9 @@ class App(_AppBase):
                 if result.stderr:
                     self.after(0, self._log, self._kfx_log,
                                result.stderr.decode("utf-8", errors="replace"), "warn")
-                # KP3 tworzy .kpf (nowsze wersje) lub .kfx (starsze) w podkatalogu
+                # KP3 tworzy .kpf (nowsze), .kfx (starsze) lub .mobi gdy brak ET
                 out_file = None
-                for pattern in ["*.kpf", "*.kfx"]:
+                for pattern in ["*.kpf", "*.kfx", "*.mobi"]:
                     found = list(kp3_out.rglob(pattern))
                     if found:
                         out_file = found[0]
@@ -1823,6 +1823,10 @@ class App(_AppBase):
                 if out_file:
                     dest = out_dir / (epub_path.stem + out_file.suffix)
                     shutil.move(str(out_file), str(dest))
+                    if out_file.suffix.lower() == ".mobi":
+                        self.after(0, self._log, self._kfx_log,
+                                   f"⚠ EPUB nie obsługuje Enhanced Typesetting — "
+                                   f"KP3 skonwertował do .mobi zamiast .kpf\n", "warn")
                     self.after(0, self._log, self._kfx_log, f"✓ {dest}\n", "ok")
                     success = True
                 else:
@@ -1836,7 +1840,7 @@ class App(_AppBase):
                                        f"  {f.relative_to(kp3_out)}\n", "warn")
                         # próbuj odczytać pliki tekstowe (log, txt, html)
                         for log_file in sorted(all_out):
-                            if log_file.suffix.lower() in {".log", ".txt", ".html", ".htm"}:
+                            if log_file.suffix.lower() in {".log", ".txt", ".html", ".htm", ".csv"}:
                                 try:
                                     content = log_file.read_text(encoding="utf-8", errors="replace")
                                     if content.strip():
