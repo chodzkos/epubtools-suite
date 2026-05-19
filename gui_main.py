@@ -164,21 +164,25 @@ def _find_ebook_editor() -> str:
 def _find_kindle_previewer() -> str:
     """Szuka Kindle Previewer 3 — preferuje .exe nad .bat (bat może startować KP3 asynchronicznie)."""
     username = os.environ.get("USERNAME", "")
-    exe_candidates = [
-        r"C:\Program Files\Amazon\Kindle Previewer 3\KindlePreviewer.exe",
-        r"C:\Program Files (x86)\Amazon\Kindle Previewer 3\KindlePreviewer.exe",
-        rf"C:\Users\{username}\AppData\Local\Amazon\Kindle Previewer 3\KindlePreviewer.exe",
-        rf"C:\Users\{username}\AppData\Roaming\Amazon\Kindle Previewer 3\KindlePreviewer.exe",
+    # KP3 może być zainstalowany jako "Kindle Previewer 3.exe" lub "KindlePreviewer.exe"
+    kp3_dirs = [
+        r"C:\Program Files\Amazon\Kindle Previewer 3",
+        r"C:\Program Files (x86)\Amazon\Kindle Previewer 3",
+        rf"C:\Users\{username}\AppData\Local\Amazon\Kindle Previewer 3",
+        rf"C:\Users\{username}\AppData\Roaming\Amazon\Kindle Previewer 3",
     ]
-    for p in exe_candidates:
-        if os.path.isfile(p):
-            return p
+    for d in kp3_dirs:
+        for exe_name in ["Kindle Previewer 3.exe", "KindlePreviewer.exe"]:
+            p = os.path.join(d, exe_name)
+            if os.path.isfile(p):
+                return p
     # szukaj w PATH — jeśli to .bat, spróbuj znaleźć .exe w tym samym katalogu lub podkatalogu
     kp = shutil.which("KindlePreviewer")
     if kp:
         if kp.lower().endswith(".bat"):
             bat_dir = os.path.dirname(kp)
-            for rel in [r"KindlePreviewer.exe",
+            for rel in ["Kindle Previewer 3.exe", "KindlePreviewer.exe",
+                        r"Kindle Previewer 3\Kindle Previewer 3.exe",
                         r"Kindle Previewer 3\KindlePreviewer.exe"]:
                 candidate = os.path.join(bat_dir, rel)
                 if os.path.isfile(candidate):
@@ -1161,7 +1165,9 @@ class App(_AppBase):
         self._kfx_kp3_entry = PathEntry(
             eng_sec, mode="file",
             filetypes=[("Kindle Previewer", "KindlePreviewer.exe"), ("Exe", "*.exe")],
-            tooltip="Ścieżka do KindlePreviewer.exe (nie .bat!)\n"
+            tooltip="Ścieżka do pliku .exe KP3 (nie .bat!)\n"
+                    "Plik może nazywać się:\n"
+                    "  'Kindle Previewer 3.exe' lub 'KindlePreviewer.exe'\n"
                     "Pobierz z: amazon.com/kindlepreview\n"
                     "Typowe lokalizacje:\n"
                     "C:\\Program Files\\Amazon\\Kindle Previewer 3\\\n"
@@ -1791,7 +1797,8 @@ class App(_AppBase):
                     self.after(0, self._log, self._kfx_log,
                                "⚠ Wykryto plik .BAT zamiast .exe — konwersja może nie działać.\n"
                                "  Wskaż bezpośrednio KindlePreviewer.exe w polu ścieżki.\n", "warn")
-                cmd = [kp3, str(input_path), "-convert", "-output_dir", str(kp3_tmp)]
+                # KP3 używa flagi -output (nie -output_dir)
+                cmd = [kp3, str(input_path), "-convert", "-output", str(kp3_tmp)]
                 self.after(0, self._log, self._kfx_log, " ".join(cmd) + "\n", "cmd")
                 result = subprocess.run(cmd, capture_output=True, text=True,
                                         creationflags=CREATE_NO_WINDOW, timeout=300)
@@ -1799,16 +1806,21 @@ class App(_AppBase):
                     self.after(0, self._log, self._kfx_log, result.stdout)
                 if result.stderr:
                     self.after(0, self._log, self._kfx_log, result.stderr, "warn")
-                # KP3 może umieścić .kfx w podkatalogu — szukamy rekurencyjnie
-                kfx_found = list(kp3_tmp.rglob("*.kfx"))
-                if kfx_found:
-                    dest = out_dir / (epub_path.stem + ".kfx")
-                    shutil.move(str(kfx_found[0]), str(dest))
+                # KP3 tworzy .kpf (nowsze wersje) lub .kfx (starsze) w podkatalogu
+                out_file = None
+                for pattern in ["*.kpf", "*.kfx"]:
+                    found = list(kp3_tmp.rglob(pattern))
+                    if found:
+                        out_file = found[0]
+                        break
+                if out_file:
+                    dest = out_dir / (epub_path.stem + out_file.suffix)
+                    shutil.move(str(out_file), str(dest))
                     self.after(0, self._log, self._kfx_log, f"✓ {dest}\n", "ok")
                     success = True
                 else:
                     self.after(0, self._log, self._kfx_log,
-                               "✗ Nie znaleziono pliku .kfx w katalogu wyjściowym\n", "err")
+                               "✗ Nie znaleziono pliku .kpf/.kfx w katalogu wyjściowym\n", "err")
             except subprocess.TimeoutExpired:
                 self.after(0, self._log, self._kfx_log,
                            "✗ Przekroczono czas oczekiwania (5 min)\n", "err")
