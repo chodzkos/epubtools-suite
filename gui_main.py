@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import traceback
 import zipfile
 import xml.etree.ElementTree as ET
@@ -1805,6 +1806,8 @@ class App(_AppBase):
                 # KP3 używa flagi -output (nie -output_dir)
                 cmd = [kp3, str(kp3_in), "-convert", "-output", str(kp3_out)]
                 self.after(0, self._log, self._kfx_log, " ".join(cmd) + "\n", "cmd")
+                # zapamiętaj czas startu — po błędzie szukamy katalogów GUID stworzonych przez KP3
+                kp3_start_time = time.time()
                 result = subprocess.run(cmd, capture_output=True,
                                         creationflags=CREATE_NO_WINDOW, timeout=300)
                 if result.stdout:
@@ -1830,30 +1833,10 @@ class App(_AppBase):
                     self.after(0, self._log, self._kfx_log, f"✓ {dest}\n", "ok")
                     success = True
                 else:
-                    # wylistuj wszystkie pliki w katalogu wyjściowym (diagnostyka)
-                    all_out = [f for f in kp3_out.rglob("*") if f.is_file()]
-                    if all_out:
-                        self.after(0, self._log, self._kfx_log,
-                                   "Pliki w katalogu wyjściowym KP3:\n", "warn")
-                        for f in sorted(all_out):
-                            self.after(0, self._log, self._kfx_log,
-                                       f"  {f.relative_to(kp3_out)}\n", "warn")
-                        # próbuj odczytać pliki tekstowe (log, txt, html)
-                        for log_file in sorted(all_out):
-                            if log_file.suffix.lower() in {".log", ".txt", ".html", ".htm", ".csv"}:
-                                try:
-                                    content = log_file.read_text(encoding="utf-8", errors="replace")
-                                    if content.strip():
-                                        self.after(0, self._log, self._kfx_log,
-                                                   f"\n--- {log_file.name} ---\n{content}\n", "warn")
-                                except Exception:
-                                    pass
-                    else:
-                        self.after(0, self._log, self._kfx_log,
-                                   "Katalog wyjściowy KP3 jest pusty — KP3 mógł zapisać\n"
-                                   "logi we własnym katalogu AppData.\n", "warn")
+                    # KP3 zapisuje właściwe logi do katalogu GUID w %TEMP% — szukamy po czasie startu
+                    self._kp3_show_guid_logs(kp3_start_time)
                     self.after(0, self._log, self._kfx_log,
-                               "✗ Nie znaleziono pliku .kpf/.kfx w katalogu wyjściowym\n", "err")
+                               "✗ Nie znaleziono pliku .kpf/.kfx/.mobi w katalogu wyjściowym\n", "err")
             except subprocess.TimeoutExpired:
                 self.after(0, self._log, self._kfx_log,
                            "✗ Przekroczono czas oczekiwania (5 min)\n", "err")
@@ -2070,6 +2053,42 @@ class App(_AppBase):
         outdir = self._conv_outdir.get()
         base = Path(outdir) if outdir else input_path.parent
         return base / (input_path.stem + ".epub")
+
+    def _kp3_show_guid_logs(self, since: float) -> None:
+        """Szuka katalogów GUID stworzonych przez KP3 w %TEMP% po czasie `since` i pokazuje logi."""
+        guid_re = re.compile(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+        tmp = Path(tempfile.gettempdir())
+        found_any = False
+        try:
+            for d in tmp.iterdir():
+                if not d.is_dir() or not guid_re.match(d.name):
+                    continue
+                try:
+                    if d.stat().st_mtime < since:
+                        continue
+                except OSError:
+                    continue
+                log_files = [f for f in d.rglob("*") if f.is_file()
+                             and f.suffix.lower() in {".csv", ".log", ".txt", ".html", ".htm"}]
+                if not log_files:
+                    continue
+                found_any = True
+                self.after(0, self._log, self._kfx_log,
+                           f"\nLogi KP3 ({d.name}):\n", "warn")
+                for lf in sorted(log_files):
+                    try:
+                        content = lf.read_text(encoding="utf-8", errors="replace").strip()
+                        if content:
+                            self.after(0, self._log, self._kfx_log,
+                                       f"--- {lf.name} ---\n{content}\n", "warn")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        if not found_any:
+            self.after(0, self._log, self._kfx_log,
+                       "Nie znaleziono logów KP3 w katalogu tymczasowym.\n", "warn")
 
     # ── Uruchamianie procesów ─────────────────────────────────────────────────
 
