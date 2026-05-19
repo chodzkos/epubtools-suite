@@ -162,18 +162,29 @@ def _find_ebook_editor() -> str:
 
 
 def _find_kindle_previewer() -> str:
-    """Szuka Kindle Previewer 3."""
-    kp = shutil.which("KindlePreviewer")
-    if kp:
-        return kp
+    """Szuka Kindle Previewer 3 — preferuje .exe nad .bat (bat może startować KP3 asynchronicznie)."""
     username = os.environ.get("USERNAME", "")
-    for p in [
+    exe_candidates = [
         r"C:\Program Files\Amazon\Kindle Previewer 3\KindlePreviewer.exe",
         r"C:\Program Files (x86)\Amazon\Kindle Previewer 3\KindlePreviewer.exe",
         rf"C:\Users\{username}\AppData\Local\Amazon\Kindle Previewer 3\KindlePreviewer.exe",
-    ]:
+        rf"C:\Users\{username}\AppData\Roaming\Amazon\Kindle Previewer 3\KindlePreviewer.exe",
+    ]
+    for p in exe_candidates:
         if os.path.isfile(p):
             return p
+    # szukaj w PATH — jeśli to .bat, spróbuj znaleźć .exe w tym samym katalogu lub podkatalogu
+    kp = shutil.which("KindlePreviewer")
+    if kp:
+        if kp.lower().endswith(".bat"):
+            bat_dir = os.path.dirname(kp)
+            for rel in [r"KindlePreviewer.exe",
+                        r"Kindle Previewer 3\KindlePreviewer.exe"]:
+                candidate = os.path.join(bat_dir, rel)
+                if os.path.isfile(candidate):
+                    return candidate
+            # .exe nie znalezione obok .bat — zwróć .bat z ostrzeżeniem (obsługa w _kfx_convert_one)
+        return kp
     return ""
 
 
@@ -1150,10 +1161,12 @@ class App(_AppBase):
         self._kfx_kp3_entry = PathEntry(
             eng_sec, mode="file",
             filetypes=[("Kindle Previewer", "KindlePreviewer.exe"), ("Exe", "*.exe")],
-            tooltip="Ścieżka do KindlePreviewer.exe\n"
+            tooltip="Ścieżka do KindlePreviewer.exe (nie .bat!)\n"
                     "Pobierz z: amazon.com/kindlepreview\n"
-                    "Typowa lokalizacja:\n"
-                    "C:\\Program Files\\Amazon\\Kindle Previewer 3\\")
+                    "Typowe lokalizacje:\n"
+                    "C:\\Program Files\\Amazon\\Kindle Previewer 3\\\n"
+                    "AppData\\Local\\Amazon\\Kindle Previewer 3\\\n"
+                    "AppData\\Roaming\\Amazon\\Kindle Previewer 3\\")
         self._kfx_kp3_entry.pack(fill="x", pady=(0, 6))
         if self._kfx_kp3_path:
             self._kfx_kp3_entry.set(self._kfx_kp3_path)
@@ -1772,6 +1785,12 @@ class App(_AppBase):
             kp3_tmp = Path(tempfile.mkdtemp(prefix="epubkfx_out_"))
             try:
                 kp3 = self._kfx_kp3_entry.get()
+                # .bat może startować KP3 asynchronicznie — subprocess.run skończy się
+                # zanim KP3 zapisze plik; należy użyć bezpośrednio KindlePreviewer.exe
+                if kp3.lower().endswith(".bat"):
+                    self.after(0, self._log, self._kfx_log,
+                               "⚠ Wykryto plik .BAT zamiast .exe — konwersja może nie działać.\n"
+                               "  Wskaż bezpośrednio KindlePreviewer.exe w polu ścieżki.\n", "warn")
                 cmd = [kp3, str(input_path), "-convert", "-output_dir", str(kp3_tmp)]
                 self.after(0, self._log, self._kfx_log, " ".join(cmd) + "\n", "cmd")
                 result = subprocess.run(cmd, capture_output=True, text=True,
@@ -2118,6 +2137,12 @@ class App(_AppBase):
         saved_eq = self._eq_entry.get()
         if (not saved_eq or not Path(saved_eq).is_file()) and self._eq_path:
             self._eq_entry.set(str(self._eq_path))
+
+        # Jeśli w configu zapisano .bat zamiast .exe, zastąp auto-wykrytym .exe
+        saved_kp3 = self._kfx_kp3_entry.get()
+        if saved_kp3.lower().endswith(".bat") and self._kfx_kp3_path \
+                and not self._kfx_kp3_path.lower().endswith(".bat"):
+            self._kfx_kp3_entry.set(self._kfx_kp3_path)
 
         for key, attr in [
             ("book_margin", "_book_margin"),
