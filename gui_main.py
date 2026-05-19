@@ -1152,17 +1152,21 @@ class App(_AppBase):
         eng_sec = Section(left, "Silnik konwersji")
         eng_sec.pack(fill="x", padx=6, pady=4)
 
-        self._kfx_engine = tk.StringVar(value="kp3")
+        self._kfx_engine = tk.StringVar(value="calibre")
 
         # Kindle Previewer 3
         kp3_row = tk.Frame(eng_sec, bg=BG)
         kp3_row.pack(fill="x")
-        ttk.Radiobutton(kp3_row, text="Kindle Previewer 3  (zalecany)",
+        ttk.Radiobutton(kp3_row, text="Kindle Previewer 3  (eksperymentalny)",
                         variable=self._kfx_engine, value="kp3").pack(side="left")
         kp3_lbl = self._status_label(eng_sec,
             "✓ Wykryto" if self._kfx_kp3_path else "✗ Nie znaleziono",
             "ok" if self._kfx_kp3_path else "err")
         kp3_lbl.pack(anchor="w", padx=(22, 0))
+        self._status_label(eng_sec,
+            "⚠ KP3 przez CLI często zwraca błąd wewnętrzny dla prawidłowych EPUB-ów.\n"
+            "  Jeśli konwersja nie działa, użyj Calibre + wtyczka KFX Output.",
+            "warn").pack(anchor="w", padx=(22, 0))
         self._kfx_kp3_entry = PathEntry(
             eng_sec, mode="file",
             filetypes=[("Kindle Previewer", "KindlePreviewer.exe"), ("Exe", "*.exe")],
